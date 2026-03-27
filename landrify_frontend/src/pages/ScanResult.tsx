@@ -59,9 +59,14 @@ export function ScanResult() {
   const strokeDashoffset = circumference - (Math.max(0, Math.min(riskScore, 100)) / 100) * circumference;
   const errMessage = (error as any)?.response?.data?.error || (error as any)?.response?.data?.detail || (error as Error | null)?.message;
 
-  const reportWords = useMemo(() => (data?.ai_report?.trim() ? data.ai_report.trim().split(/\s+/) : []), [data?.ai_report]);
+  const reportText = useMemo(() => data?.ai_report?.trim() ?? '', [data?.ai_report]);
+  const reportWords = useMemo(() => (reportText ? reportText.split(/\s+/) : []), [reportText]);
   const longReport = reportWords.length > 800;
-  const visibleReport = longReport && !showFullReport ? reportWords.slice(0, 400).join(' ') : data?.ai_report;
+  const previewReport = useMemo(
+    () => reportText.split('\n\n').filter((block) => block.trim().length > 0).slice(0, 4).join('\n\n'),
+    [reportText]
+  );
+  const visibleReport = longReport && !showFullReport ? (previewReport || reportText) : reportText;
 
   const handleDownloadPdf = async () => {
     if (!data) return;
