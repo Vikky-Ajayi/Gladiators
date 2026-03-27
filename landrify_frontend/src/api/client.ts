@@ -43,6 +43,14 @@ const client = axios.create({
 
 // Attach token to every request automatically
 client.interceptors.request.use((config) => {
+  const skipAuth = Boolean(config.headers?.['X-Skip-Auth']);
+
+  if (skipAuth && config.headers) {
+    delete config.headers['X-Skip-Auth'];
+    delete config.headers.Authorization;
+    return config;
+  }
+
   const token = localStorage.getItem('landrify_token');
   if (token) {
     config.headers.Authorization = `Token ${token}`;
