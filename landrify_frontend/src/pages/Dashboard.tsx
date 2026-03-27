@@ -178,16 +178,16 @@ export function Dashboard() {
           transition={{ delay: 0.3 }}
           className="space-y-12"
         >
-          {/* Upgrade Card */}
+          {/* Pro Access Card */}
           <div className="p-10 rounded-[2.5rem] bg-landrify-bg border border-landrify-line relative overflow-hidden group shadow-lg">
             <div className="absolute -right-8 -top-8 w-32 h-32 bg-landrify-green/10 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-700" />
             
             <div className="w-12 h-12 bg-landrify-green rounded-xl flex items-center justify-center mb-6 shadow-lg shadow-landrify-green/20">
               <TrendingUp className="text-white w-6 h-6" strokeWidth={1.5} />
             </div>
-            <h4 className="text-2xl font-serif font-medium mb-4">Enterprise Plan</h4>
-            <p className="text-gray-600 font-light mb-8 leading-relaxed text-sm">Unlock bulk verification, API access, and priority support for your firm.</p>
-            <Button className="w-full h-14 rounded-2xl shadow-lg shadow-landrify-green/10">Upgrade Now</Button>
+            <h4 className="text-2xl font-serif font-medium mb-4">Pro Access Active</h4>
+            <p className="text-gray-600 font-light mb-8 leading-relaxed text-sm">Your account has full access enabled, including premium scan and report features.</p>
+            <Button className="w-full h-14 rounded-2xl shadow-lg shadow-landrify-green/10">Plan Active</Button>
           </div>
 
           {/* Resources */}
