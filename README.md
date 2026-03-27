@@ -80,6 +80,8 @@ Millions of Nigerians lose life savings to land fraud, government acquisition di
 - Created the visual design system — risk score rings, card components, upgrade banners, and plan badges
 
 ---
+# Disclaimer due to the issues with the interswitch api all registered users are instantly bumped to Pro users
+
 
 ## 🧰 Tech Stack
 
