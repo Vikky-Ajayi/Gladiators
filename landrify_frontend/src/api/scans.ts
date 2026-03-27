@@ -1,5 +1,5 @@
 import client from './client';
-import type { ScanResult } from '../types/api';
+import type { PaginatedResponse, ScanResult } from '../types/api';
 
 export const createScan = (payload: {
   latitude: number;
@@ -14,4 +14,11 @@ export const getReport = (id: string) =>
   client.get(`/api/v1/scans/${id}/report/`).then(r => r.data);
 
 export const demoScan = (location: string) =>
-  client.post<ScanResult>('/api/v1/demo-scan/', { location }).then(r => r.data);
+  client
+    .post<ScanResult>('/api/v1/demo-scan/', { location }, { headers: { 'X-Skip-Auth': 'true' } })
+    .then(r => r.data);
+
+export const getUserScans = () =>
+  client
+    .get<PaginatedResponse<ScanResult>>('/api/v1/users/me/scans/')
+    .then((r) => r.data.results ?? []);
