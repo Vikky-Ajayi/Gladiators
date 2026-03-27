@@ -43,7 +43,7 @@ export function Dashboard() {
           </h1>
           <p className="text-gray-500 font-light tracking-wide">Manage your land verifications and risk assessments.</p>
         </div>
-        <Link to="/scan-result">
+        <Link to="/scan/new">
           <Button className="h-14 px-8 group rounded-2xl shadow-xl shadow-landrify-green/20">
             <Plus className="mr-2 w-5 h-5" strokeWidth={1.5} />
             New Land Scan
@@ -88,7 +88,7 @@ export function Dashboard() {
                     className="w-full h-20 bg-white/10 border border-white/10 rounded-2xl pl-16 pr-6 text-xl focus:outline-none focus:ring-2 focus:ring-landrify-green/50 focus:bg-white/20 transition-all placeholder:text-white/30"
                   />
                 </div>
-                <Link to="/scan-result">
+                <Link to="/scan/new">
                   <Button className="w-full h-20 text-xl rounded-2xl shadow-xl shadow-landrify-green/20 group">
                     Start AI Scan
                     <Search className="ml-3 w-6 h-6 group-hover:scale-110 transition-transform" strokeWidth={1.5} />
@@ -159,7 +159,7 @@ export function Dashboard() {
                         scan.score > 80 ? 'text-landrify-green' : 'text-landrify-orange'
                       }`}>{scan.score}%</p>
                     </div>
-                    <Link to="/scan-result">
+                    <Link to="/scan/new">
                       <Button variant="outline" className="w-12 h-12 p-0 rounded-xl group-hover:bg-landrify-green group-hover:text-white group-hover:border-landrify-green transition-all">
                         <ArrowUpRight size={20} strokeWidth={1.5} />
                       </Button>
