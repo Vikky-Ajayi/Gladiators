@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from decouple import config, Csv
+import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -65,15 +66,14 @@ WSGI_APPLICATION = 'landrify.wsgi.application'
 
 # Database — plain PostgreSQL (no PostGIS for hackathon speed)
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('DB_NAME', default='landrify'),
-        'USER': config('DB_USER', default='landrify'),
-        'PASSWORD': config('DB_PASSWORD', default='password'),
-        'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='5432'),
-    }
+    'default': dj_database_url.config(
+        default=config('DATABASE_URL'),
+        conn_max_age=600,
+        ssl_require=True
+    )
 }
+# This ensures Django uses the correct PostgreSQL engine
+DATABASES['default']['ENGINE'] = 'django.db.backends.postgresql'
 
 AUTH_USER_MODEL = 'users.User'
 
