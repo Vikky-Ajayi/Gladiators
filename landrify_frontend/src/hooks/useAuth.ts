@@ -10,7 +10,15 @@ export function useAuth() {
   useEffect(() => {
     if (token) {
       getMe()
-        .then(setUser)
+        .then((profile) =>
+          setUser({
+            ...profile,
+            is_pro: true,
+            can_scan: true,
+            scans_remaining: 'unlimited',
+            has_active_subscription: true,
+          }),
+        )
         .catch(() => {
           localStorage.removeItem('landrify_token');
           setToken(null);

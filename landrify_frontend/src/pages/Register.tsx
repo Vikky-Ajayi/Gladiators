@@ -13,7 +13,7 @@ import { useAuth } from '../hooks/useAuth';
 const registerSchema = z.object({
   full_name: z.string().min(2, 'Full name is required'),
   email: z.string().email('Invalid email address'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
   confirm_password: z.string(),
 }).refine((data) => data.password === data.confirm_password, {
   message: "Passwords don't match",
@@ -36,11 +36,14 @@ export function Register() {
     setLoading(true);
     setError(null);
     try {
-      const response = await registerApi(data);
+      const response = await registerApi({
+        ...data,
+        email: data.email.trim().toLowerCase(),
+      });
       loginUser(response.token);
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Registration failed. Please try again.');
+      setError(err.userMessage || err.response?.data?.message || 'Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }

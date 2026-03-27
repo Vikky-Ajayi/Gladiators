@@ -11,6 +11,9 @@ class RegisterSerializer(serializers.ModelSerializer):
         model  = User
         fields = ['email', 'password', 'confirm_password', 'full_name', 'phone', 'user_type']
 
+    def validate_email(self, value):
+        return User.objects.normalize_email(value.strip()).lower()
+
     def validate(self, attrs):
         if attrs['password'] != attrs.pop('confirm_password'):
             raise serializers.ValidationError({'confirm_password': 'Passwords do not match.'})
@@ -25,21 +28,29 @@ class LoginSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
+        email = User.objects.normalize_email(attrs['email'].strip()).lower()
         user = authenticate(
             request=self.context.get('request'),
-            username=attrs['email'],
+            username=email,
             password=attrs['password'],
         )
+        if not user:
+            # Fallback: tolerate case variants from existing records
+            existing_user = User.objects.filter(email__iexact=email).first()
+            if existing_user and existing_user.check_password(attrs['password']):
+                user = existing_user
         if not user:
             raise serializers.ValidationError('Invalid email or password.')
         if not user.is_active:
             raise serializers.ValidationError('Account is disabled.')
+        attrs['email'] = email
         attrs['user'] = user
         return attrs
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
-    is_pro          = serializers.BooleanField(read_only=True)
+    is_pro          = serializers.SerializerMethodField()
+    has_active_subscription = serializers.SerializerMethodField()
     can_scan        = serializers.BooleanField(read_only=True)
     scans_remaining = serializers.SerializerMethodField()
 
@@ -48,18 +59,24 @@ class UserProfileSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'email', 'full_name', 'phone', 'user_type',
             # Plan
-            'plan', 'is_pro', 'pro_expires_at',
+            'plan', 'is_pro', 'has_active_subscription', 'pro_expires_at',
             'can_scan', 'scans_remaining', 'basic_scan_used',
             # NIN verification
             'nin_verified', 'nin_verified_at', 'nin_last_four',
             'created_at',
         ]
         read_only_fields = [
-            'id', 'email', 'plan', 'is_pro', 'pro_expires_at',
+            'id', 'email', 'plan', 'is_pro', 'has_active_subscription', 'pro_expires_at',
             'can_scan', 'scans_remaining', 'basic_scan_used',
             'nin_verified', 'nin_verified_at', 'nin_last_four',
             'created_at',
         ]
+
+    def get_is_pro(self, _obj):
+        return True
+
+    def get_has_active_subscription(self, _obj):
+        return True
 
     def get_scans_remaining(self, obj):
         return obj.scans_remaining
