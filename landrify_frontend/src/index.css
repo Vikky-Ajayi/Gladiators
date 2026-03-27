@@ -1,0 +1,64 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-landrify-green: #6A8E61; /* Sage/Olive Green from palette */
+  --color-landrify-green-dark: #4A6D41; /* Deep Forest Green from palette */
+  --color-landrify-green-light: #C5D9A5; /* Light Green from palette */
+  --color-landrify-orange: #F27D26;
+  --color-landrify-bg: #F5F5DC; /* Beige/Cream from palette */
+  --color-landrify-ink: #141414;
+  --color-landrify-line: rgba(20, 20, 20, 0.1);
+  --color-landrify-sage: #94B484; /* Sage Green from palette */
+}
+
+@layer base {
+  body {
+    @apply font-sans bg-landrify-bg text-landrify-ink antialiased;
+  }
+  
+  h1, h2, h3, h4 {
+    @apply font-serif tracking-tight;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-white/70 backdrop-blur-xl border border-white/20 shadow-xl rounded-3xl;
+  }
+  
+  .btn-primary {
+    @apply bg-landrify-green text-white px-8 py-3 rounded-full font-medium transition-all hover:bg-landrify-green-dark hover:shadow-lg active:scale-95 disabled:opacity-50;
+  }
+  
+  .btn-outline {
+    @apply border border-landrify-green text-landrify-green px-8 py-3 rounded-full font-medium transition-all hover:bg-landrify-green/5 active:scale-95;
+  }
+
+  .data-value {
+    @apply font-mono tracking-tighter;
+  }
+
+  .col-header {
+    @apply font-serif italic text-[11px] opacity-50 uppercase tracking-widest;
+  }
+
+  .section-border {
+    @apply border-b border-landrify-line;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded-full hover:bg-gray-400;
+}
