@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { MapPin, Navigation, Search, AlertCircle } from 'lucide-react';
+import { MapPin, Navigation, Search, AlertCircle, X } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { createScan, demoScan } from '../api/scans';
@@ -24,6 +24,8 @@ const riskLevelColors: Record<string, string> = {
 
 const radiusRing = 70;
 const circumference = 2 * Math.PI * radiusRing;
+
+type GpsStatus = 'idle' | 'loading' | 'success' | 'error';
 
 function formatRiskLevel(level?: string | null) {
   return (level ?? 'unknown').toUpperCase();
@@ -124,20 +126,42 @@ export function NewScan() {
   const [loading, setLoading] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [geoInfo, setGeoInfo] = useState<string | null>(null);
   const [latitude, setLatitude] = useState<string>('');
   const [longitude, setLongitude] = useState<string>('');
   const [radiusKm, setRadiusKm] = useState<number>(0.5);
   const [demoResult, setDemoResult] = useState<ScanResult | null>(null);
+  const [gpsStatus, setGpsStatus] = useState<GpsStatus>('idle');
+  const [gpsErrorMessage, setGpsErrorMessage] = useState<string | null>(null);
+  const [geoAccuracy, setGeoAccuracy] = useState<number | null>(null);
+  const [flashCoordinates, setFlashCoordinates] = useState(false);
 
   const coordinateReady = useMemo(() => latitude.trim() !== '' && longitude.trim() !== '', [latitude, longitude]);
 
+  useEffect(() => {
+    if (gpsStatus !== 'success') return;
+    const timer = window.setTimeout(() => {
+      setGpsStatus('idle');
+    }, 4000);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [gpsStatus]);
+
+  useEffect(() => {
+    if (!flashCoordinates) return;
+    const timer = window.setTimeout(() => setFlashCoordinates(false), 1000);
+    return () => window.clearTimeout(timer);
+  }, [flashCoordinates]);
+
   const useCurrentLocation = () => {
     setError(null);
-    setGeoInfo(null);
+    setGpsErrorMessage(null);
+    setGpsStatus('loading');
 
     if (!navigator.geolocation) {
-      setError('Geolocation is not supported by your browser.');
+      setGpsStatus('error');
+      setGpsErrorMessage('Geolocation is not supported by your browser.');
       return;
     }
 
@@ -145,10 +169,13 @@ export function NewScan() {
       (position) => {
         setLatitude(position.coords.latitude.toFixed(6));
         setLongitude(position.coords.longitude.toFixed(6));
-        setGeoInfo(`Accuracy: ±${Math.round(position.coords.accuracy)}m`);
+        setGeoAccuracy(Math.round(position.coords.accuracy));
+        setFlashCoordinates(true);
+        setGpsStatus('success');
       },
       (geoError) => {
-        setError(geoError.message);
+        setGpsStatus('error');
+        setGpsErrorMessage(geoError.message);
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
@@ -219,12 +246,48 @@ export function NewScan() {
 
       <div className="glass-card p-8 rounded-[2.5rem] shadow-2xl border-white/40 bg-white/60">
         <form onSubmit={handleScan} className="space-y-7">
-          <div className="flex flex-wrap items-center gap-3">
-            <Button type="button" onClick={useCurrentLocation} variant="outline" className="rounded-2xl h-12 px-5">
-              <Navigation className="mr-2 w-4 h-4" />
-              Use My Current Location
-            </Button>
-            {geoInfo && <p className="text-sm text-gray-600">{geoInfo}</p>}
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="button" onClick={useCurrentLocation} variant="outline" className="rounded-2xl h-12 px-5" disabled={gpsStatus === 'loading'}>
+                {gpsStatus === 'loading' ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2"></div>
+                    Getting your location...
+                  </>
+                ) : (
+                  <>
+                    <Navigation className="mr-2 w-4 h-4" />
+                    Use My Current Location
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {gpsStatus === 'loading' && (
+              <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+                📡 Locating you... Please allow location access if prompted by your browser.
+              </div>
+            )}
+
+            {gpsStatus === 'success' && (
+              <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+                ✅ Location found — coordinates filled in below.
+              </div>
+            )}
+
+            {gpsStatus === 'error' && gpsErrorMessage && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-start justify-between gap-3">
+                <p>⚠️ Could not get location: {gpsErrorMessage}. Please enter coordinates manually or use a quick-fill button below.</p>
+                <button
+                  type="button"
+                  onClick={() => setGpsStatus('idle')}
+                  className="text-amber-700 hover:text-amber-900"
+                  aria-label="Dismiss GPS error"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
 
           <div>
@@ -239,7 +302,9 @@ export function NewScan() {
                   onClick={() => {
                     setLatitude(item.latitude.toFixed(6));
                     setLongitude(item.longitude.toFixed(6));
-                    setGeoInfo(null);
+                    setGpsStatus('idle');
+                    setGeoAccuracy(null);
+                    setGpsErrorMessage(null);
                     setError(null);
                   }}
                 >
@@ -247,6 +312,24 @@ export function NewScan() {
                 </Button>
               ))}
             </div>
+            <Input
+              type="range"
+              min={0.1}
+              max={10}
+              step={0.1}
+              value={radiusKm}
+              onChange={(e) => setRadiusKm(Number.parseFloat(e.target.value))}
+              className="h-3 rounded-full px-0"
+            />
+            <Input
+              type="number"
+              min={0.1}
+              max={10}
+              step={0.1}
+              value={radiusKm}
+              onChange={(e) => setRadiusKm(Number.parseFloat(e.target.value) || 0.1)}
+              className="h-12 rounded-2xl mt-3"
+            />
           </div>
 
           <div className="grid sm:grid-cols-2 gap-4">
@@ -259,7 +342,7 @@ export function NewScan() {
                 value={latitude}
                 onChange={(e) => setLatitude(e.target.value)}
                 placeholder="6.469800"
-                className="h-14 rounded-2xl"
+                className={`h-14 rounded-2xl transition-all duration-700 ${flashCoordinates ? 'bg-green-50 border-green-300 ring-1 ring-green-200' : ''}`}
               />
             </div>
             <div>
@@ -271,10 +354,16 @@ export function NewScan() {
                 value={longitude}
                 onChange={(e) => setLongitude(e.target.value)}
                 placeholder="3.585200"
-                className="h-14 rounded-2xl"
+                className={`h-14 rounded-2xl transition-all duration-700 ${flashCoordinates ? 'bg-green-50 border-green-300 ring-1 ring-green-200' : ''}`}
               />
             </div>
           </div>
+
+          {geoAccuracy !== null && (
+            <p className="text-sm text-gray-500">
+              📍 Accuracy: ±{geoAccuracy}m{geoAccuracy > 100 ? ' — Move outside for better accuracy' : ''}
+            </p>
+          )}
 
           <div>
             <div className="flex items-center justify-between mb-2">
