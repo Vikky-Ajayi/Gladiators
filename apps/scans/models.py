@@ -17,6 +17,9 @@ class FloodRiskZone(models.Model):
     max_lat   = models.DecimalField(max_digits=10, decimal_places=8)
     min_lng   = models.DecimalField(max_digits=11, decimal_places=8)
     max_lng   = models.DecimalField(max_digits=11, decimal_places=8)
+    flood_type = models.CharField(max_length=30, blank=True)
+    peak_months = models.CharField(max_length=100, blank=True)
+    last_major_flood_year = models.IntegerField(null=True, blank=True)
     data_source = models.CharField(max_length=100, blank=True)
     notes     = models.TextField(blank=True)
     last_updated = models.DateTimeField(auto_now=True)
@@ -49,6 +52,7 @@ class AcquisitionArea(models.Model):
     gazette_reference = models.CharField(max_length=255, blank=True)
     date_gazetted    = models.DateField(null=True, blank=True)
     data_source      = models.CharField(max_length=100, blank=True)
+    notes            = models.TextField(blank=True)
     created_at       = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -67,11 +71,17 @@ class Dam(models.Model):
     name         = models.CharField(max_length=255)
     river_basin  = models.CharField(max_length=100, blank=True)
     state        = models.CharField(max_length=50, blank=True)
+    country      = models.CharField(max_length=50, blank=True, default='Nigeria')
     latitude     = models.DecimalField(max_digits=10, decimal_places=8)
     longitude    = models.DecimalField(max_digits=11, decimal_places=8)
     capacity_mcm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    height_m     = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    year_completed = models.IntegerField(null=True, blank=True)
+    purpose      = models.CharField(max_length=255, blank=True)
     risk_level   = models.CharField(max_length=20, default='medium')
+    downstream_states = models.CharField(max_length=255, blank=True)
     data_source  = models.CharField(max_length=100, blank=True)
+    notes        = models.TextField(blank=True)
 
     class Meta:
         db_table = 'dams'
@@ -124,6 +134,10 @@ class LandScan(models.Model):
     # ── Flood Risk ────────────────────────────────────────────────────
     flood_risk_level  = models.CharField(max_length=20, blank=True)
     flood_zone_name   = models.CharField(max_length=255, blank=True)
+    flood_type        = models.CharField(max_length=30, blank=True)
+    flood_peak_months = models.CharField(max_length=100, blank=True)
+    flood_last_major_year = models.IntegerField(null=True, blank=True)
+    flood_notes       = models.TextField(blank=True)
     flood_data_source = models.CharField(max_length=100, blank=True)
 
     # ── Erosion ───────────────────────────────────────────────────────
@@ -133,6 +147,13 @@ class LandScan(models.Model):
     nearest_dam_name         = models.CharField(max_length=255, blank=True)
     nearest_dam_distance_km  = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     dam_risk_level           = models.CharField(max_length=20, blank=True)
+    dam_river_basin          = models.CharField(max_length=100, blank=True)
+    dam_capacity_mcm         = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    dam_height_m             = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    dam_year_completed       = models.IntegerField(null=True, blank=True)
+    dam_purpose              = models.CharField(max_length=255, blank=True)
+    dam_downstream_states    = models.CharField(max_length=255, blank=True)
+    dam_notes                = models.TextField(blank=True)
 
     # ── Terrain ───────────────────────────────────────────────────────
     elevation_meters = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
