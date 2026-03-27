@@ -100,7 +100,7 @@ export function NewScan() {
 
       <div className="mt-12 flex items-center justify-center space-x-2 text-gray-400 text-sm">
         <AlertCircle size={16} />
-        <p>Verification scans consume 1 credit. <Link to="/pricing" className="text-landrify-green font-bold hover:underline">Get more credits</Link></p>
+        <p>All verification features are enabled on your account. <Link to="/pricing" className="text-landrify-green font-bold hover:underline">See plan status</Link></p>
       </div>
     </div>
   );

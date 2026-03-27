@@ -1,12 +1,28 @@
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 from decouple import config, Csv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = config('DJANGO_SECRET_KEY', default='django-insecure-change-this-in-production-now')
 DEBUG = config('DEBUG', default=False, cast=bool)
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='*', cast=Csv())
+
+
+def _normalize_allowed_host(raw_host: str) -> str:
+    host = (raw_host or '').strip()
+    if not host:
+        return ''
+    if host == '*':
+        return '*'
+    if '://' in host:
+        host = urlparse(host).netloc or urlparse(host).path
+    host = host.strip('/').split('/')[0]
+    return host
+
+
+_raw_allowed_hosts = config('ALLOWED_HOSTS', default='*', cast=Csv())
+ALLOWED_HOSTS = [h for h in (_normalize_allowed_host(item) for item in _raw_allowed_hosts) if h]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -134,18 +150,15 @@ REST_KNOX = {
 # ── URLs — 100% driven by environment variables, zero hardcoding ───────────────
 # FRONTEND_URL  → your React app (local: http://localhost:5173, prod: https://app.vercel.app)
 # API_BASE_URL  → this Django server (local: http://127.0.0.1:8000, prod: https://api.railway.app)
-FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')
 API_BASE_URL  = config('API_BASE_URL', default='http://127.0.0.1:8000')
 
 # CORS — allow all in debug, use env var in production
-if DEBUG:
-    CORS_ALLOW_ALL_ORIGINS = True
-else:
-    CORS_ALLOWED_ORIGINS = config(
-        'CORS_ALLOWED_ORIGINS',
-        default='http://localhost:5173',
-        cast=Csv()
-    )
+CORS_ALLOWED_ORIGINS = config(
+    'CORS_ALLOWED_ORIGINS',
+    default='http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173',
+    cast=Csv()
+)
 CORS_ALLOW_CREDENTIALS = True
 
 # DRF Spectacular (API Docs)
