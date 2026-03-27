@@ -122,9 +122,11 @@ export function Dashboard() {
           >
             <div className="flex items-center justify-between">
               <h3 className="text-3xl font-serif font-medium text-landrify-ink">Recent Scans</h3>
-              <Button variant="ghost" className="text-landrify-green hover:bg-landrify-green/5 rounded-xl">
-                View All <ArrowUpRight className="ml-2 w-4 h-4" strokeWidth={1.5} />
-              </Button>
+              <Link to="/scans">
+                <Button variant="ghost" className="text-landrify-green hover:bg-landrify-green/5 rounded-xl">
+                  View All <ArrowUpRight className="ml-2 w-4 h-4" strokeWidth={1.5} />
+                </Button>
+              </Link>
             </div>
 
             <div className="space-y-4">

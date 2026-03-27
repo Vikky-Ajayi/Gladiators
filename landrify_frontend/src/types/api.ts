@@ -16,6 +16,7 @@ export interface ScanResult {
   id: string;
   scan_reference: string;
   status: 'processing' | 'completed' | 'failed';
+  created_at?: string;
   scan_type: 'basic' | 'pro';
   latitude: string;
   longitude: string;

@@ -17,3 +17,7 @@ export const demoScan = (location: string) =>
   client
     .post<ScanResult>('/api/v1/demo-scan/', { location }, { headers: { 'X-Skip-Auth': 'true' } })
     .then(r => r.data);
+
+
+export const getUserScans = () =>
+  client.get<ScanResult[]>('/api/v1/users/me/scans/').then(r => r.data);
