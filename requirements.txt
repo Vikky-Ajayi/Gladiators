@@ -5,6 +5,8 @@ django-cors-headers>=4.0
 
 # Auth
 django-rest-knox>=4.2
+dj-database-url
+
 
 # Database
 psycopg2-binary>=2.9
