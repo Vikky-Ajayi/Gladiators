@@ -40,7 +40,7 @@ export function Register() {
       loginUser(response.token);
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Registration failed. Please try again.');
+      setError(err.userMessage || err.response?.data?.message || 'Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }
