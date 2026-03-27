@@ -1,135 +1,118 @@
-# Landrify API
+#  Landrify — Land Verification for Nigeria
 
-> Land verification platform for Nigeria — know before you buy.
-> Built for the **Enyata Buildathon × Interswitch Developer Community** hackathon.
+> **Know before you buy.**
 
-**Payment provider:** Interswitch Webpay  
-**Live docs:** `https://your-app.up.railway.app/api/docs/`  
-**Health check:** `https://your-app.up.railway.app/api/v1/health/`  
-**Demo scan (no login):** `https://your-app.up.railway.app/api/v1/demo-scan/`
+Landrify is a land intelligence platform that lets anyone verify a plot of land in Nigeria before purchasing — checking flood risk, erosion risk, dam proximity, government acquisition status, and delivering an AI-powered 5–50 year environmental time-projection report.
+
+Built for the **Enyata Buildathon × Interswitch Developer Community Hackathon**.
 
 ---
 
-## Quick Demo (For Judges)
+## 🏆 The Problem We're Solving
 
-No account needed. Hit the demo endpoint to see the risk engine live:
-
-```bash
-# See available demo locations
-GET /api/v1/demo-scan/
-
-# Run a scan on Lekki (high flood risk)
-POST /api/v1/demo-scan/
-{ "location": "lekki_high_flood" }
-
-# Run a scan on Ibeju-Lekki (government acquisition zone)
-POST /api/v1/demo-scan/
-{ "location": "ibeju_acquisition" }
-
-# Run a scan on Maitama, Abuja (low risk — shows contrast)
-POST /api/v1/demo-scan/
-{ "location": "abuja_safe" }
-
-# Custom coordinates
-POST /api/v1/demo-scan/
-{ "latitude": 6.5244, "longitude": 3.3792 }
-```
-
-Available demo keys: `lekki_high_flood`, `ibeju_acquisition`, `abuja_safe`, `onitsha_critical`, `port_harcourt`
+Millions of Nigerians lose life savings to land fraud, government acquisition disputes, and unverified environmental hazards every year. There is no simple, accessible way for a buyer to verify a plot of land before committing. Landrify changes that — scan any location in Nigeria in seconds and get a comprehensive risk report powered by real data.
 
 ---
 
-## Local Setup
+## 👥 Team Members & Contributions
 
-### 1. Install
-```bash
-git clone https://github.com/your-username/landrify-backend.git
-cd landrify-backend
-python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-```
+### Ajayi Victoria — Team Leader & Backend Developer
 
-### 2. Create database
-```bash
-psql -U postgres -c "CREATE DATABASE landrify;"
-psql -U postgres -c "CREATE USER landrify WITH PASSWORD 'password';"
-psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE landrify TO landrify;"
-```
+**Role:** Led the overall project vision, architecture, and backend engineering.
 
-### 3. Configure
-```bash
-cp .env.example .env
-# Fill in your credentials (see .env.example for all keys)
-```
+**Technical contributions:**
+- Designed the entire system architecture — Django REST Framework backend, Knox token auth, PostgreSQL schema, and Interswitch payment + NIN identity integration
+- Built the complete risk engine (`apps/scans/services.py`) — geocoding via Nominatim (OpenStreetMap), elevation via Open-Elevation API, satellite imagery via Mapbox, and Haversine-based dam proximity calculation
+- Integrated **Interswitch Webpay** for Pro subscription payments — full OAuth2 flow, payment initialization, redirect callback verification, and hash-based signature validation
+- Integrated **Interswitch Identity API** for optional NIN verification — post-registration security feature that verifies NIN against national identity database and matches against account name
+- Integrated **Groq AI** (llama-3.3-70b-versatile) for the 5/10/15/20/30/40/50-year time-projection report — Pro-only feature that generates environmental risk analysis across multiple time horizons
+- Built the Basic/Pro plan gate — Basic users get 1 free scan with a summary report; Pro users get unlimited scans with the full AI report
+- Compiled the comprehensive Nigerian land risk dataset used in the database — 50+ flood risk zones (all 36 states + FCT) sourced from NIHSA Annual Flood Outlooks 2021–2024, 25 dams including Lagdo Dam (Cameroon), and 17 government acquisition areas sourced from LASURA, FCDA/AGIS, and published legal records
+- Built the live interactive API tester (`/tester/`) served directly from Django, enabling real-time scan testing with GPS location
+- Configured deployment to Railway with PostgreSQL, WhiteNoise static files, and full environment variable management
+- Wrote all technical documentation including the frontend architecture specification
 
-### 4. Migrate & seed
-```bash
-python manage.py migrate
-python manage.py seed_data   # Loads Nigerian flood zones, dams, acquisition areas
-```
-
-### 5. Run
-```bash
-python manage.py runserver
-# API:   http://localhost:8000
-# Docs:  http://localhost:8000/api/docs/
-# Admin: http://localhost:8000/admin/
-```
+**Non-technical contributions:**
+- Defined the product scope, user journey, and plan structure (Basic vs Pro)
+- Led all API key procurement and third-party service setup (Interswitch, Mapbox, Groq)
+- Managed project timeline and task coordination across the team
 
 ---
 
-## Interswitch Setup
+### Oyesunle Lekan — Co-Backend Developer
 
-This project uses **Interswitch Webpay** as the payment gateway.
+**Role:** Backend co-development, data research, and API endpoint implementation.
 
-1. Register at [developer.interswitchgroup.com](https://developer.interswitchgroup.com)
-2. Create a new application
-3. Copy your test credentials:
-   - **Client ID** → `INTERSWITCH_CLIENT_ID`
-   - **Client Secret** → `INTERSWITCH_CLIENT_SECRET`
-   - **Merchant Code** → `INTERSWITCH_MERCHANT_CODE`
-   - **Pay Item ID** → `INTERSWITCH_PAY_ITEM_ID`
-4. Set `INTERSWITCH_REDIRECT_URL` to your frontend payment callback URL
+**Technical contributions:**
+- Implemented the alerts system (`apps/alerts/`) — alert model, list/read/delete endpoints, and mark-all-read functionality
+- Implemented the saved lands feature (`apps/scans/saved_views.py`) — users can bookmark scanned plots for later reference and monitoring
+- Built user profile management endpoints — profile update, change password, and scan history views
+- Contributed to the scan serializers and the full scan result data structure (`apps/scans/serializers.py`)
+- Assisted with database schema design — models for `LandScan`, `FloodRiskZone`, `AcquisitionArea`, `Dam`, `SavedLand`, `Payment`, `Alert`
+- Researched and contributed Nigerian flood risk data for the seed dataset — sourced NIHSA flood outlooks, NEMA situation reports, OCHA Nigeria reports, and UNDP flood impact assessments for all 36 states
+- Ran backend integration tests and helped debug the Interswitch payment redirect flow
 
-The client is in `apps/payments/interswitch.py` and handles OAuth2 token acquisition, payment initialization, and transaction verification automatically.
+**Non-technical contributions:**
+- Conducted research into Nigerian land ownership law, government acquisition processes (LSDPC, FCDA/AGIS, gazette references), and petroleum zone restrictions used in the acquisition area dataset
+- Reviewed the live tester against the API spec to verify endpoint accuracy
 
 ---
 
-## Deploy to Railway
+### Akinfenwa Obaseyi — Frontend Developer
 
-### 1. Push to GitHub
-```bash
-git init && git add . && git commit -m "Landrify backend"
-git remote add origin https://github.com/YOUR/landrify-backend.git
-git push -u origin main
-```
+**Role:** Frontend architecture, React + TypeScript application, and UI/UX design.
 
-### 2. Railway setup
-1. [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub**
-2. Add **PostgreSQL** plugin
-3. Set environment variables (Variables tab):
+**Technical contributions:**
+- Architected the complete React 18 + TypeScript + Vite frontend application
+- Built the interactive map interface using **Mapbox GL JS** — satellite layer, draggable pin placement, and animated radius circle showing the scan area
+- Implemented the full authentication flow — register, login, Knox token management, protected routes, and auto-redirect on 401
+- Built the scan results display — animated risk score ring, environmental risk cards (flood / erosion / dam / government land), satellite image preview, and AI report markdown renderer
+- Implemented the **Interswitch payment callback flow** — `/payment/callback` route reads the `?reference=` parameter, calls the verify endpoint, invalidates the user cache, and redirects with plan update
+- Built the Pro upgrade page with Interswitch payment initiation and redirect
+- Built the dashboard — saved lands list, recent scan history, account status, plan badge, and Pro expiry
+- Built the optional NIN verification UI — form, submission, response handling, and verified badge display on profile
+- Set up `@tanstack/react-query` for all API state management — caching, loading states, background refetch
+- Configured environment variables (all API URLs via `VITE_API_BASE_URL` — zero hardcoding)
+- Deployed the frontend to Vercel with production environment configuration
 
-| Variable | Value |
+**Non-technical contributions:**
+- Designed the overall UI/UX — colour language (green for safe, amber for medium, red for critical), information hierarchy, and mobile-responsive layout
+- Created the visual design system — risk score rings, card components, upgrade banners, and plan badges
+
+---
+
+## 🧰 Tech Stack
+
+| Layer | Technology |
 |---|---|
-| `DJANGO_SECRET_KEY` | `python -c "import secrets; print(secrets.token_hex(32))"` |
-| `DEBUG` | `False` |
-| `ALLOWED_HOSTS` | `your-app.up.railway.app` |
-| `CORS_ALLOWED_ORIGINS` | `https://your-frontend.vercel.app` |
-| `GOOGLE_MAPS_API_KEY` | Your key |
-| `INTERSWITCH_CLIENT_ID` | From Interswitch dashboard |
-| `INTERSWITCH_CLIENT_SECRET` | From Interswitch dashboard |
-| `INTERSWITCH_MERCHANT_CODE` | From Interswitch dashboard |
-| `INTERSWITCH_PAY_ITEM_ID` | From Interswitch dashboard |
-| `INTERSWITCH_REDIRECT_URL` | `https://your-frontend.vercel.app/payment/callback` |
-| `DB_NAME` | `${{Postgres.PGDATABASE}}` |
-| `DB_USER` | `${{Postgres.PGUSER}}` |
-| `DB_PASSWORD` | `${{Postgres.PGPASSWORD}}` |
-| `DB_HOST` | `${{Postgres.PGHOST}}` |
-| `DB_PORT` | `${{Postgres.PGPORT}}` |
-
-Railway auto-runs `migrate` + `seed_data` on every deploy (via `Procfile`).
+| Backend | Django 5 + Django REST Framework |
+| Auth | Knox Token Authentication |
+| Database | PostgreSQL |
+| AI Reports | Groq (llama-3.3-70b-versatile) |
+| Payments | Interswitch Webpay |
+| Identity | Interswitch Identity API (NIN verification) |
+| Geocoding | Nominatim / OpenStreetMap (free, no key) |
+| Elevation | Open-Elevation API (free, no key) |
+| Satellite Imagery | Mapbox Static Maps API |
+| Frontend | React 18 + TypeScript + Vite |
+| Map | Mapbox GL JS |
+| Deployment | Railway (backend) + Vercel (frontend) |
 
 ---
+
+## 🔌 Interswitch Integration
+
+This project uses two Interswitch APIs:
+
+### 1. Webpay — Pro Subscription Payments
+Users pay ₦5,000/month to upgrade to Pro. The flow:
+1. `POST /api/v1/payments/initialize/` → returns `authorization_url`
+2. Frontend redirects user to Interswitch hosted checkout
+3. Interswitch POSTs to `/api/v1/payments/redirect/` (signature verified via SHA-512 hash)
+4. `GET /api/v1/payments/verify/?reference=XXX` confirms payment and upgrades user to Pro
+
+### 2. Identity API — NIN Verification
+Optional post-registration security feature. Users can verify their NIN at any time to get a verified badge on their account. Not required to use the app — purely for additional identity assurance.
 
 ## API Reference
 
