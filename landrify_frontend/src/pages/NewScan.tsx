@@ -345,7 +345,7 @@ export function NewScan() {
 
           {geoAccuracy !== null && (
             <p className="text-sm text-gray-500">
-              📍 Accuracy: ±{geoAccuracy}m{geoAccuracy > 100 ? ' — Move outside for better accuracy' : ''}
+              Accuracy: ±{geoAccuracy}m{geoAccuracy > 100 ? ' — Move outside for better accuracy' : ''}
             </p>
           )}
 
