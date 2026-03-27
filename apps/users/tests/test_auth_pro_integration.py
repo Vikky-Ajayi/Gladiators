@@ -53,3 +53,25 @@ class AuthProIntegrationTests(APITestCase):
     def test_protected_profile_still_requires_authentication(self):
         response = self.client.get(reverse("user-profile"))
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_register_and_login_normalize_email_case_and_whitespace(self):
+        register_response = self.client.post(
+            reverse("auth-register"),
+            {
+                "email": "  MIXED.Case.User@Example.COM  ",
+                "password": "SuperSecure123",
+                "confirm_password": "SuperSecure123",
+                "full_name": "Case User",
+            },
+            format="json",
+        )
+        self.assertEqual(register_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(register_response.data["user"]["email"], "mixed.case.user@example.com")
+
+        login_response = self.client.post(
+            reverse("auth-login"),
+            {"email": "MiXeD.CASE.User@example.com", "password": "SuperSecure123"},
+            format="json",
+        )
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+        self.assertIn("token", login_response.data)
