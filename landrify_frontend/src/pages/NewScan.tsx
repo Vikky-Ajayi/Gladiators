@@ -91,7 +91,7 @@ function InlineResult({ result }: { result: ScanResult }) {
               ⚠️ GOVERNMENT ACQUISITION AREA{result.legal_status.authority ? ` — ${result.legal_status.authority}` : ''}
             </p>
           ) : (
-            <p className="text-green-600 font-semibold">✅ No government acquisition records found</p>
+            <p className="text-green-600 font-semibold"> No government acquisition records found</p>
           )}
           {result.legal_status.gazette_reference && (
             <p className="text-sm text-gray-700">Gazette: {result.legal_status.gazette_reference}</p>
@@ -265,13 +265,13 @@ export function NewScan() {
 
             {gpsStatus === 'loading' && (
               <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-                📡 Locating you... Please allow location access if prompted by your browser.
+              Locating you... Please allow location access if prompted by your browser.
               </div>
             )}
 
             {gpsStatus === 'success' && (
               <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-                ✅ Location found — coordinates filled in below.
+                 Location found — coordinates filled in below.
               </div>
             )}
 
@@ -312,24 +312,8 @@ export function NewScan() {
                 </Button>
               ))}
             </div>
-            <Input
-              type="range"
-              min={0.1}
-              max={10}
-              step={0.1}
-              value={radiusKm}
-              onChange={(e) => setRadiusKm(Number.parseFloat(e.target.value))}
-              className="h-3 rounded-full px-0"
-            />
-            <Input
-              type="number"
-              min={0.1}
-              max={10}
-              step={0.1}
-              value={radiusKm}
-              onChange={(e) => setRadiusKm(Number.parseFloat(e.target.value) || 0.1)}
-              className="h-12 rounded-2xl mt-3"
-            />
+            
+            
           </div>
 
           <div className="grid sm:grid-cols-2 gap-4">
