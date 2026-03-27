@@ -8,7 +8,12 @@ if (!apiBaseUrl) {
 
 const extractErrorMessage = (data: any): string | null => {
   if (!data) return null;
-  if (typeof data === 'string') return data;
+  if (typeof data === 'string') {
+    if (data.toLowerCase().includes('<!doctype html')) {
+      return 'Server configuration error. Please contact support with this request time.';
+    }
+    return data;
+  }
 
   if (typeof data.detail === 'string') return data.detail;
   if (typeof data.error === 'string') return data.error;
