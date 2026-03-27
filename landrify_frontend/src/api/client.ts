@@ -6,8 +6,30 @@ if (!apiBaseUrl) {
   throw new Error('VITE_API_BASE_URL is not set. Add it to your frontend .env file.');
 }
 
+const extractErrorMessage = (data: any): string | null => {
+  if (!data) return null;
+  if (typeof data === 'string') return data;
+
+  if (typeof data.detail === 'string') return data.detail;
+  if (typeof data.error === 'string') return data.error;
+  if (typeof data.message === 'string') return data.message;
+
+  if (typeof data === 'object') {
+    for (const [field, value] of Object.entries(data)) {
+      if (Array.isArray(value) && value.length > 0) {
+        return field === 'non_field_errors' ? String(value[0]) : `${field}: ${value[0]}`;
+      }
+      if (typeof value === 'string') {
+        return field === 'non_field_errors' ? value : `${field}: ${value}`;
+      }
+    }
+  }
+
+  return null;
+};
+
 const client = axios.create({
-  baseURL: (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:8000',
+  baseURL: apiBaseUrl,
   headers: { 'Content-Type': 'application/json' },
   withCredentials: true,
   xsrfCookieName: 'csrftoken',
@@ -28,7 +50,7 @@ client.interceptors.response.use(
   (res) => res,
   (err) => {
     const status = err.response?.status;
-    const detail = err.response?.data?.detail || err.response?.data?.error;
+    const detail = extractErrorMessage(err.response?.data);
     err.userMessage =
       detail ||
       (status === 404

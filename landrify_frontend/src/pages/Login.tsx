@@ -31,7 +31,10 @@ export function Login() {
     setLoading(true);
     setError(null);
     try {
-      const response = await login(data);
+      const response = await login({
+        ...data,
+        email: data.email.trim().toLowerCase(),
+      });
       loginUser(response.token);
       navigate('/dashboard');
     } catch (err: any) {
