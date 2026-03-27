@@ -196,7 +196,7 @@ def check_legal_status(lat: float, lng: float) -> dict:
             'acquisition_type': area.acquisition_type,
             'area_name': area.area_name,
             'gazette_reference': area.gazette_reference,
-            'note': 'This land is within a government acquisition area. Proceed with caution.',
+            'note': area.notes or 'This land is within a government acquisition area. Proceed with caution.',
         }
 
     return {
@@ -225,6 +225,9 @@ def check_flood_risk(lat: float, lng: float, elevation: float | None = None) -> 
         return {
             'risk_level': zone.risk_level,
             'zone_name': zone.zone_name,
+            'flood_type': zone.flood_type,
+            'peak_months': zone.peak_months,
+            'last_major_flood_year': zone.last_major_flood_year,
             'data_source': zone.data_source,
             'notes': zone.notes,
             'method': 'zone_data',
@@ -316,6 +319,12 @@ def check_dam_proximity(lat: float, lng: float) -> dict:
         'distance_km': distance_km,
         'risk_level': risk_level,
         'river_basin': nearest.river_basin if nearest else '',
+        'capacity_mcm': nearest.capacity_mcm if nearest else None,
+        'height_m': nearest.height_m if nearest else None,
+        'year_completed': nearest.year_completed if nearest else None,
+        'purpose': nearest.purpose if nearest else '',
+        'downstream_states': nearest.downstream_states if nearest else '',
+        'notes': nearest.notes if nearest else '',
     }
 
 
@@ -412,6 +421,10 @@ def run_land_scan(scan, full_report: bool = False) -> dict:
     flood = check_flood_risk(lat, lng, elevation)
     scan.flood_risk_level = flood.get('risk_level', 'unknown')
     scan.flood_zone_name = flood.get('zone_name', '')
+    scan.flood_type = flood.get('flood_type', '')
+    scan.flood_peak_months = flood.get('peak_months', '')
+    scan.flood_last_major_year = flood.get('last_major_flood_year')
+    scan.flood_notes = flood.get('notes', '')
     scan.flood_data_source = flood.get('data_source', '')
 
     # 5. Erosion risk
@@ -423,6 +436,13 @@ def run_land_scan(scan, full_report: bool = False) -> dict:
     scan.nearest_dam_name = dam.get('nearest_dam', '')
     scan.nearest_dam_distance_km = dam.get('distance_km')
     scan.dam_risk_level = dam.get('risk_level', 'unknown')
+    scan.dam_river_basin = dam.get('river_basin', '')
+    scan.dam_capacity_mcm = dam.get('capacity_mcm')
+    scan.dam_height_m = dam.get('height_m')
+    scan.dam_year_completed = dam.get('year_completed')
+    scan.dam_purpose = dam.get('purpose', '')
+    scan.dam_downstream_states = dam.get('downstream_states', '')
+    scan.dam_notes = dam.get('notes', '')
 
     # 7. Overall score
     scan.risk_score = calculate_risk_score(legal, flood, erosion, dam)
@@ -462,11 +482,22 @@ def run_land_scan(scan, full_report: bool = False) -> dict:
         'legal_notes': scan.legal_notes,
         'flood_risk_level': scan.flood_risk_level,
         'flood_zone_name': scan.flood_zone_name,
+        'flood_type': scan.flood_type,
+        'flood_peak_months': scan.flood_peak_months,
+        'flood_last_major_year': scan.flood_last_major_year,
+        'flood_notes': scan.flood_notes,
         'flood_data_source': scan.flood_data_source,
         'erosion_risk_level': scan.erosion_risk_level,
         'nearest_dam_name': scan.nearest_dam_name,
         'nearest_dam_distance_km': scan.nearest_dam_distance_km,
         'dam_risk_level': scan.dam_risk_level,
+        'dam_river_basin': scan.dam_river_basin,
+        'dam_capacity_mcm': scan.dam_capacity_mcm,
+        'dam_height_m': scan.dam_height_m,
+        'dam_year_completed': scan.dam_year_completed,
+        'dam_purpose': scan.dam_purpose,
+        'dam_downstream_states': scan.dam_downstream_states,
+        'dam_notes': scan.dam_notes,
         'risk_score': scan.risk_score,
         'risk_level': scan.risk_level,
         'accuracy_meters': float(scan.accuracy_meters) if scan.accuracy_meters else None,

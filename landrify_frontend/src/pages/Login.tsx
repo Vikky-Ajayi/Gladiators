@@ -35,7 +35,7 @@ export function Login() {
       loginUser(response.token);
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Invalid email or password');
+      setError(err.userMessage || err.response?.data?.message || 'Invalid email or password');
     } finally {
       setLoading(false);
     }

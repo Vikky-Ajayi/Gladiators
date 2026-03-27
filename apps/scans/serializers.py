@@ -77,6 +77,10 @@ class LandScanDetailSerializer(serializers.ModelSerializer):
             'flood': {
                 'risk_level':  obj.flood_risk_level,
                 'zone_name':   obj.flood_zone_name,
+                'flood_type':  obj.flood_type,
+                'peak_months': obj.flood_peak_months,
+                'last_major_flood_year': obj.flood_last_major_year,
+                'notes': obj.flood_notes,
                 'data_source': obj.flood_data_source,
             },
             'erosion': {
@@ -86,6 +90,13 @@ class LandScanDetailSerializer(serializers.ModelSerializer):
                 'nearest_dam': obj.nearest_dam_name,
                 'distance_km': obj.nearest_dam_distance_km,
                 'risk_level':  obj.dam_risk_level,
+                'river_basin': obj.dam_river_basin,
+                'capacity_mcm': obj.dam_capacity_mcm,
+                'height_m': obj.dam_height_m,
+                'year_completed': obj.dam_year_completed,
+                'purpose': obj.dam_purpose,
+                'downstream_states': obj.dam_downstream_states,
+                'notes': obj.dam_notes,
             },
         }
 
