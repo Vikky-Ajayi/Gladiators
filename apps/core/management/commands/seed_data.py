@@ -121,21 +121,35 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING('DRY RUN — no data will be written\n'))
 
         if not dry:
-            FloodRiskZone.objects.all().delete()
             for d in FLOOD_ZONES:
-                FloodRiskZone.objects.create(**d)
+                lookup = {
+                    'zone_name': d['zone_name'],
+                    'state': d['state'],
+                    'lga': d.get('lga', ''),
+                }
+                defaults = {k: v for k, v in d.items() if k not in lookup}
+                FloodRiskZone.objects.update_or_create(**lookup, defaults=defaults)
         self.stdout.write(self.style.SUCCESS(f'{"[DRY RUN]" if dry else "✓"} {len(FLOOD_ZONES)} flood risk zones'))
 
         if not dry:
-            Dam.objects.all().delete()
             for d in DAMS:
-                Dam.objects.create(**d)
+                lookup = {
+                    'name': d['name'],
+                    'state': d.get('state', ''),
+                }
+                defaults = {k: v for k, v in d.items() if k not in lookup}
+                Dam.objects.update_or_create(**lookup, defaults=defaults)
         self.stdout.write(self.style.SUCCESS(f'{"[DRY RUN]" if dry else "✓"} {len(DAMS)} dams'))
 
         if not dry:
-            AcquisitionArea.objects.all().delete()
             for d in ACQUISITION_AREAS:
-                AcquisitionArea.objects.create(**d)
+                lookup = {
+                    'area_name': d['area_name'],
+                    'state': d['state'],
+                    'lga': d.get('lga', ''),
+                }
+                defaults = {k: v for k, v in d.items() if k not in lookup}
+                AcquisitionArea.objects.update_or_create(**lookup, defaults=defaults)
         self.stdout.write(self.style.SUCCESS(f'{"[DRY RUN]" if dry else "✓"} {len(ACQUISITION_AREAS)} acquisition areas'))
 
         self.stdout.write(self.style.SUCCESS(
