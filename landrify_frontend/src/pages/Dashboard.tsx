@@ -1,9 +1,57 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
 import { Button } from '../components/ui/Button';
-import { Search, MapPin, History, ShieldCheck, TrendingUp, AlertTriangle, FileText, Plus, ArrowUpRight, Activity, ExternalLink, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Search, MapPin, ShieldCheck, TrendingUp, FileText, Plus, ArrowUpRight, Activity, ExternalLink, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { getUserScans } from '../api/scans';
+import type { ScanResult } from '../types/api';
+
+const riskColorClasses: Record<string, string> = {
+  low: 'text-landrify-green',
+  medium: 'text-amber-500',
+  high: 'text-landrify-orange',
+  critical: 'text-red-600',
+  unknown: 'text-gray-500',
+};
+
+const riskIconClasses: Record<string, string> = {
+  low: 'bg-landrify-green/10 text-landrify-green',
+  medium: 'bg-amber-100 text-amber-500',
+  high: 'bg-landrify-orange/10 text-landrify-orange',
+  critical: 'bg-red-100 text-red-600',
+  unknown: 'bg-gray-100 text-gray-500',
+};
+
+const getRelativeDate = (value?: string) => {
+  if (!value) return 'N/A';
+  const date = new Date(value);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffHours < 1) return 'Just now';
+  if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays} days ago`;
+
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
+};
+
+const displayAddress = (scan: ScanResult) => {
+  const address = (scan.address ?? '').trim();
+  const coordinatePattern = /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/;
+  if (!address || coordinatePattern.test(address)) {
+    return `${scan.lga}, ${scan.state}`;
+  }
+  return address;
+};
 
 export function Dashboard() {
   const { user } = useAuth();
@@ -24,11 +72,13 @@ export function Dashboard() {
     visible: { opacity: 1, y: 0 }
   };
 
-  const recentScans = [
-    { id: 'LR-9021', location: 'Lekki Phase 1, Lagos', date: '2 hours ago', status: 'Verified', score: 98, type: 'Residential' },
-    { id: 'LR-8842', location: 'Ibeju-Lekki, Lagos', date: 'Yesterday', status: 'Warning', score: 64, type: 'Agricultural' },
-    { id: 'LR-8710', location: 'Maitama, Abuja', date: '3 days ago', status: 'Verified', score: 95, type: 'Commercial' }
-  ];
+  const { data: recentScans, isLoading: scansLoading, error: scansError } = useQuery({
+    queryKey: ['dashboard-recent-scans'],
+    queryFn: async () => {
+      const scans = await getUserScans();
+      return scans.slice(0, 3);
+    },
+  });
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -122,51 +172,78 @@ export function Dashboard() {
           >
             <div className="flex items-center justify-between">
               <h3 className="text-3xl font-serif font-medium text-landrify-ink">Recent Scans</h3>
-              <Button variant="ghost" className="text-landrify-green hover:bg-landrify-green/5 rounded-xl">
-                View All <ArrowUpRight className="ml-2 w-4 h-4" strokeWidth={1.5} />
-              </Button>
+              <Link to="/scans">
+                <Button variant="ghost" className="text-landrify-green hover:bg-landrify-green/5 rounded-xl">
+                  View All <ArrowUpRight className="ml-2 w-4 h-4" strokeWidth={1.5} />
+                </Button>
+              </Link>
             </div>
 
             <div className="space-y-4">
-              {recentScans.map((scan) => (
-                <motion.div
-                  key={scan.id}
-                  variants={itemVariants}
-                  whileHover={{ x: 10 }}
-                  className="group flex items-center justify-between p-8 rounded-3xl bg-white border border-landrify-line hover:border-landrify-green transition-all shadow-sm hover:shadow-xl"
-                >
-                  <div className="flex items-center space-x-8">
-                    <div className={`w-16 h-16 rounded-2xl flex items-center justify-center ${
-                      scan.status === 'Verified' ? 'bg-landrify-green/10 text-landrify-green' : 'bg-landrify-orange/10 text-landrify-orange'
-                    }`}>
-                      {scan.status === 'Verified' ? <CheckCircle2 strokeWidth={1.5} /> : <AlertCircle strokeWidth={1.5} />}
-                    </div>
-                    <div>
-                      <div className="flex items-center space-x-3 mb-1">
-                        <span className="data-value text-xs text-gray-400">{scan.id}</span>
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-gray-300">•</span>
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500">{scan.type}</span>
+              {scansLoading && (
+                <>
+                  {[1, 2, 3].map((item) => (
+                    <div key={item} className="h-32 rounded-3xl bg-gray-200 animate-pulse" />
+                  ))}
+                </>
+              )}
+
+              {!scansLoading && scansError && (
+                <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700">
+                  {(scansError as any)?.response?.data?.error || (scansError as any)?.response?.data?.detail || (scansError as Error)?.message}
+                </div>
+              )}
+
+              {!scansLoading && !scansError && recentScans && recentScans.length === 0 && (
+                <div className="rounded-2xl border border-landrify-line bg-white p-8 text-center">
+                  <p className="text-gray-700">No scans yet.</p>
+                  <Link to="/scan/new" className="inline-block mt-4">
+                    <Button className="rounded-xl">Start your first scan</Button>
+                  </Link>
+                </div>
+              )}
+
+              {!scansLoading && !scansError && recentScans && recentScans.length > 0 && recentScans.map((scan) => {
+                const riskLevel = scan.risk_level || 'unknown';
+                const iconClass = riskIconClasses[riskLevel] ?? riskIconClasses.unknown;
+                const scoreClass = riskColorClasses[riskLevel] ?? riskColorClasses.unknown;
+
+                return (
+                  <motion.div
+                    key={scan.id}
+                    variants={itemVariants}
+                    whileHover={{ x: 10 }}
+                    className="group flex items-center justify-between p-8 rounded-3xl bg-white border border-landrify-line hover:border-landrify-green transition-all shadow-sm hover:shadow-xl"
+                  >
+                    <div className="flex items-center space-x-8">
+                      <div className={`w-16 h-16 rounded-2xl flex items-center justify-center ${iconClass}`}>
+                        {riskLevel === 'low' ? <CheckCircle2 strokeWidth={1.5} /> : riskLevel === 'critical' ? <AlertCircle strokeWidth={1.5} /> : <AlertTriangle strokeWidth={1.5} />}
                       </div>
-                      <h4 className="text-xl font-medium text-landrify-ink">{scan.location}</h4>
-                      <p className="text-sm text-gray-500 mt-1">{scan.date}</p>
+                      <div>
+                        <div className="flex items-center space-x-3 mb-1">
+                          <span className="data-value text-xs text-gray-400">{scan.scan_reference}</span>
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-gray-300">•</span>
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500">{scan.scan_type === 'pro' ? 'Pro ⭐' : 'Basic'}</span>
+                        </div>
+                        <h4 className="text-xl font-medium text-landrify-ink">{displayAddress(scan)}</h4>
+                        <p className="text-sm text-gray-500 mt-1">{getRelativeDate(scan.created_at)}</p>
+                      </div>
                     </div>
-                  </div>
-                  
-                  <div className="flex items-center space-x-12">
-                    <div className="text-right">
-                      <p className="col-header text-gray-400 mb-1">Trust Score</p>
-                      <p className={`text-2xl font-bold ${
-                        scan.score > 80 ? 'text-landrify-green' : 'text-landrify-orange'
-                      }`}>{scan.score}%</p>
+
+                    <div className="flex items-center space-x-12">
+                      <div className="text-right">
+                        <p className="col-header text-gray-400 mb-1">RISK SCORE</p>
+                        <p className={`text-2xl font-bold ${scoreClass}`}>{scan.risk_score ?? 0}</p>
+                      </div>
+                      <Link to={`/scan/${scan.id}`}>
+                        <Button variant="outline" className="w-12 h-12 p-0 rounded-xl group-hover:bg-landrify-green group-hover:text-white group-hover:border-landrify-green transition-all">
+                          <ArrowUpRight size={20} strokeWidth={1.5} />
+                        </Button>
+                      </Link>
                     </div>
-                    <Link to="/scan/new">
-                      <Button variant="outline" className="w-12 h-12 p-0 rounded-xl group-hover:bg-landrify-green group-hover:text-white group-hover:border-landrify-green transition-all">
-                        <ArrowUpRight size={20} strokeWidth={1.5} />
-                      </Button>
-                    </Link>
-                  </div>
-                </motion.div>
-              ))}
+                  </motion.div>
+                );
+              })}
             </div>
           </motion.div>
         </div>
@@ -195,9 +272,9 @@ export function Dashboard() {
             <h4 className="text-xl font-serif font-medium px-2">Resources</h4>
             <div className="space-y-3">
               {[
-                { icon: <FileText size={18} strokeWidth={1.5} />, label: "Land Act 2024 Guide" },
-                { icon: <ShieldCheck size={18} strokeWidth={1.5} />, label: "Security Best Practices" },
-                { icon: <Activity size={18} strokeWidth={1.5} />, label: "System Status" }
+                { icon: <FileText size={18} strokeWidth={1.5} />, label: 'Land Act 2024 Guide' },
+                { icon: <ShieldCheck size={18} strokeWidth={1.5} />, label: 'Security Best Practices' },
+                { icon: <Activity size={18} strokeWidth={1.5} />, label: 'System Status' }
               ].map((item, idx) => (
                 <button key={idx} className="w-full flex items-center justify-between p-5 rounded-2xl hover:bg-white border border-transparent hover:border-landrify-line transition-all group">
                   <div className="flex items-center space-x-4 text-gray-600 group-hover:text-landrify-ink">
