@@ -31,11 +31,14 @@ export function Login() {
     setLoading(true);
     setError(null);
     try {
-      const response = await login(data);
+      const response = await login({
+        ...data,
+        email: data.email.trim().toLowerCase(),
+      });
       loginUser(response.token);
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Invalid email or password');
+      setError(err.userMessage || err.response?.data?.message || 'Invalid email or password');
     } finally {
       setLoading(false);
     }

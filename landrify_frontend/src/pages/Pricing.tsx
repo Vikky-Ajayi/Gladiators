@@ -16,7 +16,8 @@ export function Pricing() {
         "PDF Report",
         "7-Day Access"
       ],
-      cta: "Get Started",
+      cta: "Included",
+      link: "/dashboard",
       popular: false
     },
     {
@@ -31,7 +32,8 @@ export function Pricing() {
         "30-Day Access",
         "Dedicated Support"
       ],
-      cta: "Go Professional",
+      cta: "Already Unlocked",
+      link: "/dashboard",
       popular: true
     },
     {
@@ -46,7 +48,8 @@ export function Pricing() {
         "Custom Data Integration",
         "Account Manager"
       ],
-      cta: "Contact Sales",
+      cta: "Already Unlocked",
+      link: "/dashboard",
       popular: false
     }
   ];
@@ -102,7 +105,7 @@ export function Pricing() {
                 ))}
               </div>
 
-              <Link to={plan.price === 'Custom' ? '/contact' : '/register'}>
+              <Link to={plan.link}>
                 <Button className={`w-full h-16 text-lg ${plan.popular ? 'bg-landrify-green hover:bg-landrify-green-dark' : ''}`}>
                   {plan.cta}
                 </Button>
@@ -119,11 +122,11 @@ export function Pricing() {
             </p>
           </div>
           <div className="flex flex-col sm:flex-row gap-4">
-            <Link to="/contact">
-              <Button variant="outline" className="h-16 px-12 text-lg">Contact Sales</Button>
+            <Link to="/dashboard">
+              <Button variant="outline" className="h-16 px-12 text-lg">All Features Active</Button>
             </Link>
-            <Link to="/register">
-              <Button className="h-16 px-12 text-lg">Get Started</Button>
+            <Link to="/dashboard">
+              <Button className="h-16 px-12 text-lg">Go to Dashboard</Button>
             </Link>
           </div>
         </div>
