@@ -13,8 +13,8 @@ class LandScanAdmin(admin.ModelAdmin):
 
 @admin.register(FloodRiskZone)
 class FloodRiskZoneAdmin(admin.ModelAdmin):
-    list_display = ['zone_name', 'state', 'lga', 'risk_level', 'data_source']
-    list_filter = ['risk_level', 'state']
+    list_display = ['zone_name', 'state', 'lga', 'risk_level', 'flood_type', 'peak_months', 'data_source']
+    list_filter = ['risk_level', 'flood_type', 'state']
     search_fields = ['zone_name', 'state', 'lga']
 
 
@@ -22,14 +22,14 @@ class FloodRiskZoneAdmin(admin.ModelAdmin):
 class AcquisitionAreaAdmin(admin.ModelAdmin):
     list_display = ['area_name', 'authority', 'state', 'acquisition_type', 'date_gazetted']
     list_filter = ['acquisition_type', 'state']
-    search_fields = ['area_name', 'authority', 'state']
+    search_fields = ['area_name', 'authority', 'state', 'notes']
 
 
 @admin.register(Dam)
 class DamAdmin(admin.ModelAdmin):
-    list_display = ['name', 'state', 'river_basin', 'risk_level', 'capacity_mcm']
+    list_display = ['name', 'state', 'river_basin', 'risk_level', 'purpose', 'capacity_mcm']
     list_filter = ['risk_level', 'state']
-    search_fields = ['name', 'river_basin', 'state']
+    search_fields = ['name', 'river_basin', 'state', 'purpose', 'downstream_states', 'notes']
 
 
 @admin.register(SavedLand)

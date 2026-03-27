@@ -4,6 +4,7 @@ export interface User {
   full_name: string;
   plan: 'basic' | 'pro';
   is_pro: boolean;
+  has_active_subscription?: boolean;
   can_scan: boolean;
   scans_remaining: number | 'unlimited';
   nin_verified: boolean;

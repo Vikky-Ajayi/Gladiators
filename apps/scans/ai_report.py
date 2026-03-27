@@ -49,6 +49,10 @@ ENVIRONMENTAL RISK DATA:
 Flood Risk:
   - Current Risk Level: {scan_data.get('flood_risk_level') or 'Unknown'}
   - Flood Zone Name: {scan_data.get('flood_zone_name') or 'No named flood zone'}
+  - Flood Type: {scan_data.get('flood_type') or 'Unknown'}
+  - Peak Flood Months: {scan_data.get('flood_peak_months') or 'Unknown'}
+  - Last Major Flood Year: {scan_data.get('flood_last_major_year') or 'Unknown'}
+  - Flood Notes: {scan_data.get('flood_notes') or 'N/A'}
   - Data Source: {scan_data.get('flood_data_source') or 'N/A'}
 
 Erosion Risk:
@@ -59,6 +63,13 @@ Dam & Water Infrastructure:
   - Nearest Dam: {scan_data.get('nearest_dam_name') or 'None identified'}
   - Distance to Nearest Dam: {scan_data.get('nearest_dam_distance_km') or 'Unknown'} km
   - Dam Risk Level: {scan_data.get('dam_risk_level') or 'Unknown'}
+  - Dam River Basin: {scan_data.get('dam_river_basin') or 'Unknown'}
+  - Dam Capacity: {scan_data.get('dam_capacity_mcm') or 'Unknown'} million m³
+  - Dam Height: {scan_data.get('dam_height_m') or 'Unknown'} m
+  - Dam Completion Year: {scan_data.get('dam_year_completed') or 'Unknown'}
+  - Dam Purpose: {scan_data.get('dam_purpose') or 'Unknown'}
+  - Downstream States: {scan_data.get('dam_downstream_states') or 'Unknown'}
+  - Dam Notes: {scan_data.get('dam_notes') or 'N/A'}
 
 Overall Risk Score: {scan_data.get('risk_score') or 'N/A'} / 100
 Overall Risk Level: {scan_data.get('risk_level') or 'Unknown'}
