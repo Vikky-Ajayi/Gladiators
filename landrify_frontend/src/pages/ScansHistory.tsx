@@ -14,24 +14,25 @@ const riskBadgeClass: Record<string, string> = {
   unknown: 'bg-gray-100 text-gray-700',
 };
 
-const formatDateTime = (value?: string) => {
+const formatDate = (value?: string) => {
   if (!value) return 'N/A';
   const date = new Date(value);
-  const formatted = new Intl.DateTimeFormat('en-GB', {
+  return new Intl.DateTimeFormat('en-GB', {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
   }).format(date);
-  return formatted.replace('am', 'AM').replace('pm', 'PM');
 };
 
 const displayAddress = (scan: ScanResult) => {
-  if (!scan.address) return `${scan.state}, ${scan.lga}`;
-  if (scan.address.length > 80) return `${scan.state}, ${scan.lga}`;
-  return scan.address;
+  const address = (scan.address ?? '').trim();
+  const coordinatePattern = /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/;
+
+  if (!address || coordinatePattern.test(address) || address.length > 80) {
+    return `${scan.state}, ${scan.lga}`;
+  }
+
+  return address;
 };
 
 export function ScansHistory() {
@@ -94,7 +95,7 @@ export function ScansHistory() {
                 <div>
                   <p className="text-xs text-gray-400 mb-1">{scan.scan_reference}</p>
                   <h3 className="text-xl font-medium text-landrify-ink">{displayAddress(scan)}</h3>
-                  <p className="text-sm text-gray-500 mt-1">{formatDateTime(scan.created_at)}</p>
+                  <p className="text-sm text-gray-500 mt-1">{formatDate(scan.created_at)}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={`px-3 py-1 rounded-full text-xs font-semibold ${riskBadgeClass[scan.risk_level] ?? riskBadgeClass.unknown}`}>
