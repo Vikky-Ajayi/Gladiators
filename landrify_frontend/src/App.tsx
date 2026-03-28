@@ -11,6 +11,7 @@ import { ScanResult } from './pages/ScanResult';
 import { HowItWorks } from './pages/HowItWorks';
 import { Pricing } from './pages/Pricing';
 import { About } from './pages/About';
+import { ScansHistory } from './pages/ScansHistory';
 import { useAuth } from './hooks/useAuth';
 
 const queryClient = new QueryClient();
@@ -57,6 +58,18 @@ export default function App() {
                   <NewScan />
                 </ProtectedRoute>
               } 
+            />
+            <Route 
+              path="/scans" 
+              element={
+                <ProtectedRoute>
+                  <ScansHistory />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/dashboard/scans" 
+              element={<Navigate to="/scans" />} 
             />
             <Route 
               path="/scan/:id" 
