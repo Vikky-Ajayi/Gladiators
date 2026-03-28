@@ -1,273 +1,243 @@
-import { useParams, Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { motion } from 'motion/react';
-import { useScan } from '../hooks/useScan';
+import ReactMarkdown from 'react-markdown';
+import { ArrowLeft, Download } from 'lucide-react';
+import { getScan } from '../api/scans';
 import { Button } from '../components/ui/Button';
-import { 
-  ShieldCheck, 
-  AlertTriangle, 
-  MapPin, 
-  Calendar, 
-  FileText, 
-  Download, 
-  Share2, 
-  CheckCircle2, 
-  XCircle,
-  TrendingDown,
-  Droplets,
-  Wind,
-  ArrowLeft,
-  Info,
-  Activity,
-  ShieldAlert,
-  Scale,
-  TreePine
-} from 'lucide-react';
+import { downloadScanPdf } from '../lib/pdf';
+
+const riskLevelColors: Record<string, string> = {
+  low: '#4ade80',
+  medium: '#fbbf24',
+  high: '#fb923c',
+  critical: '#f87171',
+  unknown: '#d1d5db',
+};
+
+const radiusRing = 70;
+const circumference = 2 * Math.PI * radiusRing;
+
+const toCaps = (value?: string | null) => (value ?? 'unknown').toUpperCase();
+
+function LoadingSkeleton() {
+  return (
+    <div className="space-y-6 animate-pulse">
+      <div className="h-44 bg-gray-200 rounded-3xl" />
+      <div className="h-72 bg-gray-200 rounded-3xl" />
+      <div className="grid md:grid-cols-2 gap-6">
+        <div className="h-52 bg-gray-200 rounded-3xl" />
+        <div className="h-52 bg-gray-200 rounded-3xl" />
+      </div>
+      <div className="h-56 bg-gray-200 rounded-3xl" />
+    </div>
+  );
+}
 
 export function ScanResult() {
   const { id } = useParams<{ id: string }>();
-  
-  const mockResult = {
-    id: id,
-    location: { latitude: 6.45, longitude: 3.38, address: 'Lekki Phase 1, Plot 42' },
-    state: { status: 'completed', progress: 100 },
-    legal_status: {
-      is_government_land: false,
-      has_dispute: false,
-      zoning: 'Residential',
-      title_type: 'C of O',
-      verification_score: 98
-    },
-    environmental_risks: {
-      flood_risk: 'Very Low',
-      soil_stability: 'High (Sandy-Clay)',
-      erosion_risk: 'Minimal'
-    },
-    created_at: '2026-03-27T10:00:00Z'
-  };
+  const [remarkPlugins, setRemarkPlugins] = useState<any[]>([]);
+  const [showFullReport, setShowFullReport] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
-  const { useScanResult } = useScan();
-  const result = mockResult;
+  useEffect(() => {
+    const dynamicImport = new Function('u', 'return import(u)') as (u: string) => Promise<any>;
+    dynamicImport('https://cdn.jsdelivr.net/npm/remark-gfm@4.0.1/+esm')
+      .then((mod) => setRemarkPlugins([mod.default]))
+      .catch(() => setRemarkPlugins([]));
+  }, []);
 
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.15
-      }
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['scan', id],
+    queryFn: () => getScan(id!),
+    enabled: !!id,
+  });
+
+  const riskScore = typeof data?.risk_score === 'number' ? data.risk_score : 0;
+  const ringColor = riskLevelColors[data?.risk_level ?? 'unknown'] ?? riskLevelColors.unknown;
+  const strokeDashoffset = circumference - (Math.max(0, Math.min(riskScore, 100)) / 100) * circumference;
+  const errMessage = (error as any)?.response?.data?.error || (error as any)?.response?.data?.detail || (error as Error | null)?.message;
+
+  const reportWords = useMemo(() => (data?.ai_report?.trim() ? data.ai_report.trim().split(/\s+/) : []), [data?.ai_report]);
+  const longReport = reportWords.length > 800;
+  const visibleReport = longReport && !showFullReport ? reportWords.slice(0, 400).join(' ') : data?.ai_report;
+
+  const handleDownloadPdf = async () => {
+    if (!data) return;
+    try {
+      setDownloading(true);
+      await downloadScanPdf(data);
+    } finally {
+      setDownloading(false);
     }
   };
 
-  const itemVariants = {
-    hidden: { opacity: 0, y: 30 },
-    visible: { opacity: 1, y: 0 }
-  };
-
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <motion.div 
-        initial={{ opacity: 0, x: -20 }}
-        animate={{ opacity: 1, x: 0 }}
-        className="mb-12"
-      >
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="mb-10 flex items-center justify-between gap-3">
         <Link to="/dashboard" className="inline-flex items-center text-gray-500 hover:text-landrify-green transition-colors group">
           <ArrowLeft className="mr-2 w-5 h-5 group-hover:-translate-x-1 transition-transform" strokeWidth={1.5} />
           <span className="font-medium">Back to Dashboard</span>
         </Link>
+        <Button className="rounded-2xl" onClick={handleDownloadPdf} disabled={!data || downloading}>
+          <Download className="mr-2 h-4 w-4" />
+          {downloading ? 'Generating PDF...' : 'Download PDF Report'}
+        </Button>
       </motion.div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
-        {/* Main Report */}
-        <div className="lg:col-span-2 space-y-12">
-          {/* Summary Card */}
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="relative overflow-hidden rounded-[3rem] bg-white border border-landrify-line shadow-2xl p-12"
-          >
-            <div className="absolute top-0 right-0 w-1/2 h-full opacity-5 pointer-events-none">
-              <img 
-                src="https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&q=80&w=1000" 
-                alt="Map texture" 
-                className="w-full h-full object-cover"
-                referrerPolicy="no-referrer"
-              />
-            </div>
+      {isLoading && <LoadingSkeleton />}
 
-            <div className="relative z-10">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8 mb-12">
-                <div>
-                  <div className="flex items-center space-x-3 mb-4">
-                    <span className="data-value text-xs text-gray-400">REPORT #{id?.slice(0, 8).toUpperCase()}</span>
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-gray-300">•</span>
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-landrify-green">Verified Secure</span>
-                  </div>
-                  <h1 className="text-5xl font-serif font-light text-landrify-ink mb-2 tracking-tight">{result.location.address}</h1>
-                  <p className="text-xl text-gray-500 font-light">Eti-Osa Local Govt, Lagos State</p>
-                </div>
-                
-                <div className="relative w-40 h-40 flex items-center justify-center">
-                  <svg className="w-full h-full -rotate-90">
-                    <circle
-                      cx="80"
-                      cy="80"
-                      r="70"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="8"
-                      className="text-gray-100"
-                    />
-                    <motion.circle
-                      cx="80"
-                      cy="80"
-                      r="70"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="8"
-                      strokeDasharray="440"
-                      initial={{ strokeDashoffset: 440 }}
-                      animate={{ strokeDashoffset: 440 - (440 * result.legal_status.verification_score) / 100 }}
-                      transition={{ duration: 2, ease: "easeOut" }}
-                      className="text-landrify-green"
-                    />
-                  </svg>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-4xl font-bold text-landrify-ink">{result.legal_status.verification_score}</span>
-                    <span className="col-header text-gray-400">Trust Score</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-8 pt-12 border-t border-landrify-line">
-                <div>
-                  <p className="col-header text-gray-400 mb-2">Land Area</p>
-                  <p className="data-value text-2xl text-landrify-ink">1,200 SQM</p>
-                </div>
-                <div>
-                  <p className="col-header text-gray-400 mb-2">Zoning</p>
-                  <p className="data-value text-2xl text-landrify-ink">{result.legal_status.zoning}</p>
-                </div>
-                <div>
-                  <p className="col-header text-gray-400 mb-2">Topography</p>
-                  <p className="data-value text-2xl text-landrify-ink">Flat</p>
-                </div>
-                <div>
-                  <p className="col-header text-gray-400 mb-2">Encumbrance</p>
-                  <p className="data-value text-2xl text-landrify-green">None</p>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Detailed Sections */}
-          <motion.div 
-            initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true }}
-            variants={containerVariants}
-            className="grid grid-cols-1 md:grid-cols-2 gap-12"
-          >
-            {/* Legal Status */}
-            <motion.div variants={itemVariants} className="p-10 rounded-[2.5rem] bg-white border border-landrify-line shadow-xl">
-              <div className="flex items-center space-x-4 mb-8">
-                <div className="w-14 h-14 bg-blue-500/10 rounded-2xl flex items-center justify-center text-blue-500">
-                  <Scale size={28} strokeWidth={1.5} />
-                </div>
-                <h3 className="text-2xl font-serif font-medium">Legal Status</h3>
-              </div>
-              
-              <div className="space-y-6">
-                {[
-                  { label: "C of O Status", value: "Valid & Verified", status: "success" },
-                  { label: "Governor's Consent", value: "Registered", status: "success" },
-                  { label: "Court Disputes", value: "No active cases", status: "success" },
-                  { label: "Caveat Emptor", value: "None detected", status: "success" }
-                ].map((item, i) => (
-                  <div key={i} className="flex items-center justify-between p-5 rounded-2xl bg-gray-50 border border-transparent hover:border-blue-100 transition-all">
-                    <span className="text-gray-500 font-medium">{item.label}</span>
-                    <div className="flex items-center text-landrify-green font-bold text-sm">
-                      <CheckCircle2 size={16} className="mr-2" strokeWidth={1.5} />
-                      {item.value}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </motion.div>
-
-            {/* Environmental Risk */}
-            <motion.div variants={itemVariants} className="p-10 rounded-[2.5rem] bg-white border border-landrify-line shadow-xl">
-              <div className="flex items-center space-x-4 mb-8">
-                <div className="w-14 h-14 bg-landrify-green/10 rounded-2xl flex items-center justify-center text-landrify-green">
-                  <TreePine size={28} strokeWidth={1.5} />
-                </div>
-                <h3 className="text-2xl font-serif font-medium">Environmental</h3>
-              </div>
-              
-              <div className="space-y-6">
-                {[
-                  { label: "Flood Risk", value: result.environmental_risks.flood_risk, status: "success" },
-                  { label: "Soil Stability", value: result.environmental_risks.soil_stability, status: "success" },
-                  { label: "Erosion Threat", value: result.environmental_risks.erosion_risk, status: "success" },
-                  { label: "Coastal Proximity", value: "1.2km from shoreline", status: "info" }
-                ].map((item, i) => (
-                  <div key={i} className="flex items-center justify-between p-5 rounded-2xl bg-gray-50 border border-transparent hover:border-landrify-green/10 transition-all">
-                    <span className="text-gray-500 font-medium">{item.label}</span>
-                    <div className="flex items-center text-landrify-ink font-bold text-sm">
-                      <Info size={16} className="mr-2 text-gray-400" strokeWidth={1.5} />
-                      {item.value}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </motion.div>
-          </motion.div>
+      {!isLoading && errMessage && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700">
+          {errMessage}
         </div>
+      )}
 
-        {/* Sidebar Actions */}
-        <motion.div 
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.4 }}
-          className="space-y-12"
-        >
-          <div className="p-10 rounded-[2.5rem] bg-landrify-ink text-white shadow-2xl relative overflow-hidden group">
-            <div className="absolute inset-0 z-0 opacity-20">
-              <img 
-                src="https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?auto=format&fit=crop&q=80&w=800" 
-                alt="Satellite Grid" 
-                className="w-full h-full object-cover"
+      {!isLoading && !errMessage && data && (
+        <div className="space-y-8">
+          <section className="bg-white rounded-3xl border border-landrify-line shadow-lg p-8">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-widest text-gray-500">{data.scan_reference}</p>
+                <h1 className="text-4xl font-serif text-landrify-ink mt-1">{data.address}</h1>
+                <p className="text-gray-600 mt-1">{data.lga}, {data.state}</p>
+              </div>
+              <span className="px-4 py-1 rounded-full text-sm font-semibold bg-landrify-green/10 text-landrify-green">
+                {data.scan_type === 'pro' ? 'Pro ⭐' : 'Basic'}
+              </span>
+            </div>
+
+            {data.satellite_image_url && (
+              <img
+                src={data.satellite_image_url}
+                alt="Satellite imagery"
+                className="w-full mt-6 rounded-2xl object-cover max-h-96"
                 referrerPolicy="no-referrer"
               />
-            </div>
-            <div className="relative z-10">
-              <h4 className="text-2xl font-serif font-medium mb-8">Verification Tools</h4>
-              <div className="space-y-4">
-                <Button className="w-full h-16 rounded-2xl bg-white text-landrify-ink hover:bg-gray-100 shadow-xl group">
-                  <Download className="mr-3 w-5 h-5 group-hover:translate-y-1 transition-transform" strokeWidth={1.5} />
-                  Download PDF Report
-                </Button>
-                <Button variant="outline" className="w-full h-16 rounded-2xl border-white/20 text-white hover:bg-white/10 group">
-                  <Share2 className="mr-3 w-5 h-5 group-hover:scale-110 transition-transform" strokeWidth={1.5} />
-                  Share Report
-                </Button>
+            )}
+          </section>
+
+          <section className="bg-white rounded-3xl border border-landrify-line shadow-lg p-8 flex flex-col items-center">
+            <div className="relative w-44 h-44">
+              <svg className="w-full h-full -rotate-90">
+                <circle cx="88" cy="88" r={radiusRing} fill="none" stroke="#e5e7eb" strokeWidth="12" />
+                <circle
+                  cx="88"
+                  cy="88"
+                  r={radiusRing}
+                  fill="none"
+                  stroke={ringColor}
+                  strokeWidth="12"
+                  strokeDasharray={circumference}
+                  strokeDashoffset={strokeDashoffset}
+                  strokeLinecap="round"
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-4xl font-bold text-landrify-ink">{riskScore}</span>
+                <span className="text-xs tracking-widest text-gray-500">RISK SCORE</span>
               </div>
             </div>
+            <p className="font-semibold mt-3">{toCaps(data.risk_level)}</p>
+          </section>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            <section className="bg-white rounded-3xl border border-landrify-line shadow-lg p-6 space-y-3">
+              <h3 className="text-2xl font-serif">Legal Status</h3>
+              {data.legal_status.is_government_land ? (
+                <p className="text-red-600 font-semibold">
+                  ⚠️ GOVERNMENT ACQUISITION AREA{data.legal_status.authority ? ` — ${data.legal_status.authority}` : ''}
+                </p>
+              ) : (
+                <p className="text-green-600 font-semibold">✅ No government acquisition records found</p>
+              )}
+              {data.legal_status.gazette_reference && (
+                <p className="text-sm text-gray-700">Gazette: {data.legal_status.gazette_reference}</p>
+              )}
+              {data.legal_status.notes && <p className="text-sm text-gray-500">{data.legal_status.notes}</p>}
+            </section>
+
+            <section className="bg-white rounded-3xl border border-landrify-line shadow-lg p-6 space-y-3">
+              <h3 className="text-2xl font-serif">Environmental</h3>
+              <p>
+                <span className="font-semibold">Flood Risk:</span> {toCaps(data.environmental_risks.flood.risk_level)}
+              </p>
+              <p className="text-sm text-gray-500">{data.environmental_risks.flood.zone_name}</p>
+              <p>
+                <span className="font-semibold">Erosion Risk:</span> {toCaps(data.environmental_risks.erosion.risk_level)}
+              </p>
+              <p>
+                <span className="font-semibold">Nearest Dam:</span> {data.environmental_risks.dam_proximity.nearest_dam} ({data.environmental_risks.dam_proximity.distance_km}km away)
+              </p>
+              <p><span className="font-semibold">Elevation:</span> {data.elevation_meters ?? 'N/A'}m above sea level</p>
+            </section>
           </div>
 
-          <div className="p-10 rounded-[2.5rem] bg-landrify-bg border border-landrify-line shadow-lg">
-            <div className="flex items-center space-x-3 mb-6">
-              <ShieldAlert className="text-landrify-orange" size={24} strokeWidth={1.5} />
-              <h4 className="text-xl font-serif font-medium">Risk Advisory</h4>
-            </div>
-            <p className="text-gray-600 font-light text-sm leading-relaxed mb-8">
-              This land has passed all primary AI scans. We recommend a physical survey to confirm the exact beacon positions before final payment.
-            </p>
-            <Button variant="ghost" className="w-full text-landrify-green hover:bg-landrify-green/5 rounded-xl">
-              Talk to a Surveyor
-            </Button>
-          </div>
-        </motion.div>
-      </div>
+          <section className="bg-white border border-gray-200 rounded-2xl p-6 text-[1.02rem] max-w-4xl">
+            <h3 className="text-2xl font-serif mb-3">AI Report</h3>
+            {data.ai_report && data.ai_report.trim().length > 0 ? (
+              <>
+                <div className="rounded-xl bg-green-50 border border-green-100 px-4 py-3 text-sm text-gray-700 mb-4">
+                  🤖 AI Time-Projection Report &nbsp; | &nbsp; Model: {data.ai_report_model || 'N/A'} &nbsp; | &nbsp; {data.ai_report_tokens ?? 'N/A'} tokens used
+                </div>
+                <article className="prose max-w-none">
+                  <ReactMarkdown
+                    remarkPlugins={remarkPlugins}
+                    components={{
+                      h1: ({ children }) => (
+                        <h1 style={{ color: '#1A7A4A', fontSize: '1.25rem', fontWeight: 700, marginTop: '1.5rem', marginBottom: '0.5rem', borderBottom: '2px solid #e8f5ee', paddingBottom: '0.25rem' }}>{children}</h1>
+                      ),
+                      h2: ({ children }) => (
+                        <h2 style={{ color: '#1A7A4A', fontSize: '1.1rem', fontWeight: 700, marginTop: '1.25rem', marginBottom: '0.4rem' }}>{children}</h2>
+                      ),
+                      h3: ({ children }) => (
+                        <h3 style={{ color: '#2d4a3e', fontSize: '1rem', fontWeight: 600, marginTop: '1rem', marginBottom: '0.3rem' }}>{children}</h3>
+                      ),
+                      p: ({ children }) => (
+                        <p style={{ lineHeight: '1.7', marginBottom: '0.75rem', color: '#374151' }}>{children}</p>
+                      ),
+                      strong: ({ children }) => (
+                        <strong style={{ color: '#1A7A4A', fontWeight: 700 }}>{children}</strong>
+                      ),
+                      ul: ({ children }) => (
+                        <ul style={{ paddingLeft: '1.5rem', marginBottom: '0.75rem', listStyleType: 'disc' }}>{children}</ul>
+                      ),
+                      li: ({ children }) => (
+                        <li style={{ marginBottom: '0.3rem', lineHeight: '1.6', color: '#374151' }}>{children}</li>
+                      ),
+                      blockquote: ({ children }) => (
+                        <blockquote style={{ borderLeft: '4px solid #1A7A4A', paddingLeft: '1rem', margin: '1rem 0', color: '#6b7280', fontStyle: 'italic' }}>{children}</blockquote>
+                      ),
+                    }}
+                  >
+                    {visibleReport || ''}
+                  </ReactMarkdown>
+                </article>
+                {longReport && (
+                  <button
+                    type="button"
+                    className="mt-2 text-sm font-semibold text-landrify-green hover:underline"
+                    onClick={() => setShowFullReport((prev) => !prev)}
+                  >
+                    {showFullReport ? 'Collapse' : 'Show full report'}
+                  </button>
+                )}
+              </>
+            ) : data.upgrade_prompt ? (
+              <div className="rounded-2xl border border-landrify-orange/40 bg-landrify-orange/10 p-5">
+                <p className="font-semibold text-landrify-ink">{data.upgrade_prompt.message}</p>
+                {data.upgrade_prompt.price && <p className="text-sm text-gray-700 mt-1">{data.upgrade_prompt.price}</p>}
+                <Link to="/pricing" className="inline-block mt-4">
+                  <Button className="rounded-2xl">Upgrade to Pro</Button>
+                </Link>
+              </div>
+            ) : (
+              <p className="text-gray-500">No AI report available for this scan.</p>
+            )}
+          </section>
+        </div>
+      )}
     </div>
   );
 }
