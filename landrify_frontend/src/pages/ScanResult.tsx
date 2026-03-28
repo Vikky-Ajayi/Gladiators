@@ -1,10 +1,12 @@
 import { Link, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Download } from 'lucide-react';
 import { getScan } from '../api/scans';
 import { Button } from '../components/ui/Button';
+import { downloadScanPdf } from '../lib/pdf';
 
 const riskLevelColors: Record<string, string> = {
   low: '#4ade80',
@@ -35,6 +37,16 @@ function LoadingSkeleton() {
 
 export function ScanResult() {
   const { id } = useParams<{ id: string }>();
+  const [remarkPlugins, setRemarkPlugins] = useState<any[]>([]);
+  const [showFullReport, setShowFullReport] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  useEffect(() => {
+    const dynamicImport = new Function('u', 'return import(u)') as (u: string) => Promise<any>;
+    dynamicImport('https://cdn.jsdelivr.net/npm/remark-gfm@4.0.1/+esm')
+      .then((mod) => setRemarkPlugins([mod.default]))
+      .catch(() => setRemarkPlugins([]));
+  }, []);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['scan', id],
@@ -47,13 +59,31 @@ export function ScanResult() {
   const strokeDashoffset = circumference - (Math.max(0, Math.min(riskScore, 100)) / 100) * circumference;
   const errMessage = (error as any)?.response?.data?.error || (error as any)?.response?.data?.detail || (error as Error | null)?.message;
 
+  const reportWords = useMemo(() => (data?.ai_report?.trim() ? data.ai_report.trim().split(/\s+/) : []), [data?.ai_report]);
+  const longReport = reportWords.length > 800;
+  const visibleReport = longReport && !showFullReport ? reportWords.slice(0, 400).join(' ') : data?.ai_report;
+
+  const handleDownloadPdf = async () => {
+    if (!data) return;
+    try {
+      setDownloading(true);
+      await downloadScanPdf(data);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="mb-10">
+      <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="mb-10 flex items-center justify-between gap-3">
         <Link to="/dashboard" className="inline-flex items-center text-gray-500 hover:text-landrify-green transition-colors group">
           <ArrowLeft className="mr-2 w-5 h-5 group-hover:-translate-x-1 transition-transform" strokeWidth={1.5} />
           <span className="font-medium">Back to Dashboard</span>
         </Link>
+        <Button className="rounded-2xl" onClick={handleDownloadPdf} disabled={!data || downloading}>
+          <Download className="mr-2 h-4 w-4" />
+          {downloading ? 'Generating PDF...' : 'Download PDF Report'}
+        </Button>
       </motion.div>
 
       {isLoading && <LoadingSkeleton />}
@@ -144,17 +174,55 @@ export function ScanResult() {
             </section>
           </div>
 
-          <section className="bg-white rounded-3xl border border-landrify-line shadow-lg p-6">
-            <h3 className="text-2xl font-serif mb-4">AI Report</h3>
+          <section className="bg-white border border-gray-200 rounded-2xl p-6 text-[1.02rem] max-w-4xl">
+            <h3 className="text-2xl font-serif mb-3">AI Report</h3>
             {data.ai_report && data.ai_report.trim().length > 0 ? (
               <>
+                <div className="rounded-xl bg-green-50 border border-green-100 px-4 py-3 text-sm text-gray-700 mb-4">
+                  🤖 AI Time-Projection Report &nbsp; | &nbsp; Model: {data.ai_report_model || 'N/A'} &nbsp; | &nbsp; {data.ai_report_tokens ?? 'N/A'} tokens used
+                </div>
                 <article className="prose max-w-none">
-                  <ReactMarkdown>{data.ai_report}</ReactMarkdown>
+                  <ReactMarkdown
+                    remarkPlugins={remarkPlugins}
+                    components={{
+                      h1: ({ children }) => (
+                        <h1 style={{ color: '#1A7A4A', fontSize: '1.25rem', fontWeight: 700, marginTop: '1.5rem', marginBottom: '0.5rem', borderBottom: '2px solid #e8f5ee', paddingBottom: '0.25rem' }}>{children}</h1>
+                      ),
+                      h2: ({ children }) => (
+                        <h2 style={{ color: '#1A7A4A', fontSize: '1.1rem', fontWeight: 700, marginTop: '1.25rem', marginBottom: '0.4rem' }}>{children}</h2>
+                      ),
+                      h3: ({ children }) => (
+                        <h3 style={{ color: '#2d4a3e', fontSize: '1rem', fontWeight: 600, marginTop: '1rem', marginBottom: '0.3rem' }}>{children}</h3>
+                      ),
+                      p: ({ children }) => (
+                        <p style={{ lineHeight: '1.7', marginBottom: '0.75rem', color: '#374151' }}>{children}</p>
+                      ),
+                      strong: ({ children }) => (
+                        <strong style={{ color: '#1A7A4A', fontWeight: 700 }}>{children}</strong>
+                      ),
+                      ul: ({ children }) => (
+                        <ul style={{ paddingLeft: '1.5rem', marginBottom: '0.75rem', listStyleType: 'disc' }}>{children}</ul>
+                      ),
+                      li: ({ children }) => (
+                        <li style={{ marginBottom: '0.3rem', lineHeight: '1.6', color: '#374151' }}>{children}</li>
+                      ),
+                      blockquote: ({ children }) => (
+                        <blockquote style={{ borderLeft: '4px solid #1A7A4A', paddingLeft: '1rem', margin: '1rem 0', color: '#6b7280', fontStyle: 'italic' }}>{children}</blockquote>
+                      ),
+                    }}
+                  >
+                    {visibleReport || ''}
+                  </ReactMarkdown>
                 </article>
-                <p className="text-sm text-gray-500 mt-4">
-                  Model: {data.ai_report_model || 'N/A'}
-                  {typeof data.ai_report_tokens === 'number' ? ` • Tokens: ${data.ai_report_tokens}` : ''}
-                </p>
+                {longReport && (
+                  <button
+                    type="button"
+                    className="mt-2 text-sm font-semibold text-landrify-green hover:underline"
+                    onClick={() => setShowFullReport((prev) => !prev)}
+                  >
+                    {showFullReport ? 'Collapse' : 'Show full report'}
+                  </button>
+                )}
               </>
             ) : data.upgrade_prompt ? (
               <div className="rounded-2xl border border-landrify-orange/40 bg-landrify-orange/10 p-5">
