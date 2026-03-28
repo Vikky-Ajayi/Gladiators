@@ -14,4 +14,6 @@ export const getReport = (id: string) =>
   client.get(`/api/v1/scans/${id}/report/`).then(r => r.data);
 
 export const demoScan = (location: string) =>
-  client.post<ScanResult>('/api/v1/demo-scan/', { location }).then(r => r.data);
+  client
+    .post<ScanResult>('/api/v1/demo-scan/', { location }, { headers: { 'X-Skip-Auth': 'true' } })
+    .then(r => r.data);
