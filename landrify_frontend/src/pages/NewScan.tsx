@@ -312,6 +312,24 @@ export function NewScan() {
                 </Button>
               ))}
             </div>
+            <Input
+              type="range"
+              min={0.1}
+              max={10}
+              step={0.1}
+              value={radiusKm}
+              onChange={(e) => setRadiusKm(Number.parseFloat(e.target.value))}
+              className="h-3 rounded-full px-0"
+            />
+            <Input
+              type="number"
+              min={0.1}
+              max={10}
+              step={0.1}
+              value={radiusKm}
+              onChange={(e) => setRadiusKm(Number.parseFloat(e.target.value) || 0.1)}
+              className="h-12 rounded-2xl mt-3"
+            />
           </div>
 
           <div className="grid sm:grid-cols-2 gap-4">
