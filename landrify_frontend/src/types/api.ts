@@ -16,6 +16,7 @@ export interface ScanResult {
   id: string;
   scan_reference: string;
   status: 'processing' | 'completed' | 'failed';
+  created_at?: string;
   scan_type: 'basic' | 'pro';
   latitude: string;
   longitude: string;
@@ -31,8 +32,9 @@ export interface ScanResult {
   satellite_image_url: string | null;
   ai_report: string; // Empty for basic, full markdown for pro
   ai_report_model: string;
+  ai_report_tokens: number | null;
   report_generated: boolean;
-  payment_status: string;
+  payment_status?: string;
   upgrade_prompt?: UpgradePrompt;
 }
 
@@ -63,6 +65,14 @@ export interface PaymentInitResponse {
 }
 
 export interface UpgradePrompt {
-  title: string;
+  title?: string;
   message: string;
+  price?: string;
+}
+
+export interface PaginatedResponse<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
 }
