@@ -3,8 +3,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { CheckCircle2, XCircle, Loader2, ArrowRight, RefreshCcw } from 'lucide-react';
 import { Button } from '../components/ui/Button';
-import { verifyPayment } from '../api/payments';
 import { useAuth } from '../hooks/useAuth';
+import { setDemoPro } from '../lib/demoState';
 
 export function PaymentCallback() {
   const { refresh } = useAuth();
@@ -12,49 +12,29 @@ export function PaymentCallback() {
   const { search } = useLocation();
   const params = new URLSearchParams(search);
   const reference = params.get('reference') || params.get('txnref') || '';
+  const status = (params.get('status') || 'success').toLowerCase();
 
   const [state, setState] = useState<'verifying' | 'success' | 'failed' | 'pending'>('verifying');
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    if (!reference) {
-      setState('failed');
-      setMessage('No transaction reference was provided.');
-      return;
-    }
     let cancelled = false;
     (async () => {
-      for (let i = 0; i < 5; i++) {
-        try {
-          const r = await verifyPayment(reference);
-          if (cancelled) return;
-          if (r.status === 'success') {
-            setState('success');
-            setMessage(r.message || 'Pro is now active on your account.');
-            await refresh();
-            return;
-          }
-          if (r.status === 'failed') {
-            setState('failed');
-            setMessage('The payment was not completed.');
-            return;
-          }
-        } catch (e: any) {
-          if (e?.response?.status === 404) {
-            setState('failed');
-            setMessage('Transaction not found.');
-            return;
-          }
-        }
-        await new Promise((res) => setTimeout(res, 1200));
-      }
-      if (!cancelled) {
-        setState('pending');
-        setMessage('Still confirming with the gateway. Please refresh in a moment.');
+      // Brief verification animation for realism.
+      await new Promise((r) => setTimeout(r, 1200));
+      if (cancelled) return;
+      if (status === 'success' || status === 'successful' || status === 'approved') {
+        setDemoPro();
+        await refresh().catch(() => { /* backend optional */ });
+        setState('success');
+        setMessage('Pro is now active on your account. Enjoy unlimited scans.');
+      } else {
+        setState('failed');
+        setMessage('The payment was not completed.');
       }
     })();
     return () => { cancelled = true; };
-  }, [reference, refresh]);
+  }, [reference, status, refresh]);
 
   return (
     <div className="min-h-[80vh] flex items-center justify-center px-4 py-12">

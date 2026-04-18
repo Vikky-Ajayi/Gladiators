@@ -4,7 +4,7 @@ import { X, User as UserIcon, Mail, Phone, ShieldCheck, BadgeCheck, Loader2, Che
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { updateMe } from '../api/auth';
-import { verifyNIN } from '../api/payments';
+import { setDemoNinVerified } from '../lib/demoState';
 import type { User } from '../types/api';
 
 interface Props {
@@ -55,19 +55,18 @@ export function ProfileModal({ open, onClose, user, onUpdated }: Props) {
     }
     setVerifyingNin(true);
     // Simulated NIMC lookup delay so the UX matches a real verification call
-    const minDelay = new Promise((r) => setTimeout(r, 1800));
-    try {
-      const [res] = await Promise.all([verifyNIN(nin), minDelay]);
-      if (res.nin_verified) {
-        setNinMsg({ type: 'ok', text: res.message || 'NIN verified successfully.' });
-        setNin('');
-        onUpdated();
-      } else {
-        setNinMsg({ type: 'err', text: res.error || 'Verification failed.' });
-      }
-    } catch (e: any) {
-      setNinMsg({ type: 'err', text: e?.response?.data?.error || e?.userMessage || 'Verification failed.' });
-    } finally { setVerifyingNin(false); }
+    await new Promise((r) => setTimeout(r, 1800));
+    // Demo rule: NINs starting with five zeros fail. Anything else succeeds.
+    if (nin.startsWith('00000')) {
+      setNinMsg({ type: 'err', text: 'NIN not found in NIMC database. Please check the number.' });
+      setVerifyingNin(false);
+      return;
+    }
+    setDemoNinVerified(nin);
+    setNinMsg({ type: 'ok', text: 'NIN verified successfully with NIMC.' });
+    setNin('');
+    setVerifyingNin(false);
+    onUpdated();
   };
 
   return (

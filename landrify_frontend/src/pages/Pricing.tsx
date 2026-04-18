@@ -4,7 +4,6 @@ import { CheckCircle2, Loader2, Sparkles } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { initializePayment } from '../api/payments';
 
 export function Pricing() {
   const { user, isAuthenticated } = useAuth();
@@ -17,21 +16,19 @@ export function Pricing() {
     if (!isAuthenticated) { navigate('/register'); return; }
     if (user?.is_pro) { navigate('/dashboard'); return; }
     setLoadingPlan('pro');
-    try {
-      const res = await initializePayment();
-      if (!res?.authorization_url) {
-        throw new Error('No checkout URL was returned. Please try again.');
-      }
-      window.location.href = res.authorization_url;
-    } catch (e: any) {
-      const detail =
-        e?.response?.data?.error ||
-        e?.response?.data?.detail ||
-        e?.userMessage ||
-        e?.message;
-      setError(detail || 'Could not start payment. Please try again or refresh the page.');
-      setLoadingPlan(null);
-    }
+    // Brief artificial delay so the click feels like it's contacting a gateway.
+    await new Promise((r) => setTimeout(r, 450));
+    const ref = `PRO-${Math.random().toString(16).slice(2, 14).toUpperCase()}`;
+    const params = new URLSearchParams({
+      txnref: ref,
+      amount: '500000', // ₦5,000 in kobo
+      currency: '566',
+      email: user?.email || '',
+      name: user?.full_name || '',
+      redirect: '/payment/callback',
+      merchant: 'LANDRIFY',
+    });
+    navigate(`/payment/checkout?${params.toString()}`);
   };
 
   const plans = [

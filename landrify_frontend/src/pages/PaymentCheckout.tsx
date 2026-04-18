@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Lock, CreditCard, ShieldCheck, Loader2, ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react';
-import { mockConfirmPayment } from '../api/payments';
+import { setDemoPro } from '../lib/demoState';
 
 /**
  * Simulated Interswitch hosted checkout page. Visually mirrors the real
@@ -58,27 +58,15 @@ export function PaymentCheckout() {
     if (otp.length < 4) { setError('Enter the OTP sent to your phone.'); return; }
     setSubmitting(true);
     setStep('processing');
-    try {
-      // Simulate gateway processing latency for realism.
-      await new Promise((r) => setTimeout(r, 1400));
-      const res = await mockConfirmPayment(reference, 'success');
-      if (res.status === 'success') {
-        setStep('done');
-        setTimeout(() => goCallback('success'), 900);
-      } else {
-        setError(res.message || 'Payment failed.');
-        setStep('form');
-      }
-    } catch (err: any) {
-      setError(err?.response?.data?.error || 'Payment could not be completed.');
-      setStep('form');
-    } finally {
-      setSubmitting(false);
-    }
+    // Simulate gateway authorisation latency for realism.
+    await new Promise((r) => setTimeout(r, 1600));
+    setDemoPro();
+    setStep('done');
+    setTimeout(() => goCallback('success'), 900);
+    setSubmitting(false);
   };
 
-  const cancel = async () => {
-    try { await mockConfirmPayment(reference, 'decline'); } catch { /* ignore */ }
+  const cancel = () => {
     goCallback('failed');
   };
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getMe } from '../api/auth';
 import type { User } from '../types/api';
+import { applyDemoOverlay } from '../lib/demoState';
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
@@ -15,7 +16,7 @@ export function useAuth() {
     }
     try {
       const profile = await getMe();
-      setUser(profile);
+      setUser(applyDemoOverlay(profile));
     } catch {
       localStorage.removeItem('landrify_token');
       setToken(null);
