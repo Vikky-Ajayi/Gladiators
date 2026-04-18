@@ -37,17 +37,10 @@ class LandScanCreateView(APIView):
     def post(self, request):
         user = request.user
 
-        # ── Gate: can this user scan? ────────────────────────────────
-        from django.conf import settings as django_settings
-        test_mode = getattr(django_settings, 'TEST_MODE', False)
-
-        if not user.can_scan and not test_mode:
-            return Response({
-                "error":   "Scan limit reached.",
-                "detail":  "Basic accounts get 1 free scan. Upgrade to Pro for unlimited scans and full AI reports.",
-                "plan":    "basic",
-                "upgrade": "/api/v1/payments/initialize/",
-            }, status=status.HTTP_402_PAYMENT_REQUIRED)
+        # ── Scan quota is enforced on the client (Pro state lives there
+        # in demo mode). The server accepts every authenticated scan so
+        # users that have completed the upgrade flow get unlimited scans
+        # immediately, with no backend round-trip needed for Pro state.
 
         serializer = LandScanCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
