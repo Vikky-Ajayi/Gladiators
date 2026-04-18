@@ -1,46 +1,28 @@
 /**
- * Interswitch wordmark — inline SVG so we never depend on an external host.
- * Colors match the official Interswitch brand (red-orange #E8242C + ink #1B1B1B).
+ * Interswitch logo marks — inline SVG so we never depend on external hosts.
+ * Brand colors: red #E8242C, ink #1A1A1A.
  */
-export function InterswitchLogo({ className = 'h-7' }: { className?: string }) {
+
+/** The "running figure" mark only — used as an icon (e.g. Quickteller row). */
+export function InterswitchMark({ className = 'w-6 h-6' }: { className?: string }) {
   return (
-    <svg
-      viewBox="0 0 320 64"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      aria-label="Interswitch"
-    >
-      {/* Stylized "i" — running figure mark */}
-      <g transform="translate(2,4)">
-        {/* head dot */}
-        <circle cx="22" cy="10" r="9" fill="#E8242C" />
-        {/* body / running stroke */}
-        <path
-          d="M14 24 L30 24 L26 56 L10 56 Z"
-          fill="#E8242C"
-        />
-        {/* trailing motion swoosh */}
-        <path
-          d="M2 38 Q14 30 26 38"
-          stroke="#E8242C"
-          strokeWidth="3.5"
-          strokeLinecap="round"
-          fill="none"
-          opacity="0.55"
-        />
-      </g>
-      {/* nterswitch wordmark */}
-      <text
-        x="48"
-        y="44"
-        fontFamily="Inter, Arial, sans-serif"
-        fontSize="34"
-        fontWeight="700"
-        fill="#1B1B1B"
-        letterSpacing="-1"
-      >
-        nterswitch
-      </text>
+    <svg viewBox="0 0 32 40" xmlns="http://www.w3.org/2000/svg" className={className} aria-hidden="true">
+      {/* Head */}
+      <circle cx="20" cy="6" r="5" fill="#E8242C" />
+      {/* Body / leading leg */}
+      <path d="M8 38 Q12 22 22 18 Q26 16 28 22 L24 26 Q20 24 18 30 L14 38 Z" fill="#E8242C" />
+      {/* Trailing leg */}
+      <path d="M3 36 Q9 30 14 32 L11 38 Z" fill="#E8242C" opacity="0.85" />
     </svg>
+  );
+}
+
+/** Full wordmark — mark + "interswitch" lowercase text. */
+export function InterswitchLogo({ className = 'h-6' }: { className?: string }) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 ${className}`}>
+      <InterswitchMark className="h-full w-auto" />
+      <span className="font-bold text-[#1A1A1A] text-[1.05em] tracking-tight lowercase">interswitch</span>
+    </span>
   );
 }
