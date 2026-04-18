@@ -67,16 +67,11 @@ class LandScanCreateView(APIView):
         )
 
         # ── Run the scan (synchronous) ────────────────────────────────
-        from django.conf import settings as django_settings
-        test_mode = getattr(django_settings, 'TEST_MODE', False)
-        run_full = user.is_pro or test_mode
-
-        if test_mode:
-            scan.scan_type = 'pro'  # Show as pro in response during testing
-            scan.save(update_fields=['scan_type'])
-
+        # AI report (Groq) is generated for EVERY scan — it's the core product.
+        # The Pro/Basic distinction is enforced elsewhere (scan quota,
+        # premium PDF features) but the on-screen AI report is always shown.
         try:
-            run_land_scan(scan, full_report=run_full)
+            run_land_scan(scan, full_report=True)
         except Exception as e:
             logger.error(f"Scan failed for {scan.scan_reference}: {e}")
             scan.status = "failed"
@@ -94,15 +89,6 @@ class LandScanCreateView(APIView):
             user.save(update_fields=["basic_scan_used"])
 
         response_data = LandScanDetailSerializer(scan).data
-
-        # Tell basic users what they're missing
-        if not user.is_pro:
-            response_data["upgrade_prompt"] = {
-                "message":  "Upgrade to Pro for the full AI-powered 5–50 year time-projection report.",
-                "price":    "₦5,000/month",
-                "upgrade":  "/api/v1/payments/initialize/",
-            }
-
         return Response(response_data, status=status.HTTP_201_CREATED)
 
 
