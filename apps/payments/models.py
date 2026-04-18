@@ -40,7 +40,7 @@ class Payment(models.Model):
     # Interswitch fields
     payment_reference = models.CharField(max_length=100, unique=True)
     gateway_reference = models.CharField(max_length=100, blank=True)
-    authorization_url = models.URLField(blank=True)
+    authorization_url = models.URLField(max_length=2000, blank=True)
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     paid_at = models.DateTimeField(null=True, blank=True)
