@@ -106,9 +106,12 @@ class InterswitchPaymentClient:
         return getattr(settings, "INTERSWITCH_PAYMENTS_MOCK_ACTIVE", True)
 
     def initialize_payment(self, amount_naira, transaction_ref, customer_email,
-                           customer_name="", redirect_url=""):
+                           customer_name="", redirect_url="", frontend_origin=""):
         amount_kobo = int(amount_naira * 100)
-        redirect    = redirect_url or settings.INTERSWITCH_REDIRECT_URL
+        # Prefer the live request's own frontend origin so the URL we build is
+        # always reachable by the user — local, Vercel preview, or production.
+        origin   = (frontend_origin or settings.FRONTEND_URL or "").rstrip("/")
+        redirect = redirect_url or f"{origin}/payment/callback"
 
         if self.mock:
             # Build a checkout URL on OUR frontend that mirrors the Interswitch
@@ -122,7 +125,7 @@ class InterswitchPaymentClient:
                 "redirect": redirect,
                 "merchant": "LANDRIFY",
             })
-            checkout = f"{settings.FRONTEND_URL}/payment/checkout?{params}"
+            checkout = f"{origin}/payment/checkout?{params}"
             logger.info(f"[MOCK] Interswitch payment initialised: {transaction_ref}")
             return {
                 "status": True,

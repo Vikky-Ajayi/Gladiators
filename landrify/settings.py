@@ -162,13 +162,26 @@ INTERSWITCH_ENV = config('INTERSWITCH_ENV', default='sandbox')
 MOCK_INTERSWITCH_PAYMENTS = config('MOCK_INTERSWITCH_PAYMENTS', default='', cast=str).lower() in ('1', 'true', 'yes')
 MOCK_INTERSWITCH_IDENTITY = config('MOCK_INTERSWITCH_IDENTITY', default='', cast=str).lower() in ('1', 'true', 'yes')
 
-# CORS — allow all in debug, use env var in production
+# CORS — explicit origins from env, plus sensible defaults for local dev
+# AND any Vercel / Replit deployment automatically (via regex).
 CORS_ALLOWED_ORIGINS = config(
     'CORS_ALLOWED_ORIGINS',
-    default='http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173',
-    cast=Csv()
+    default=(
+        'http://localhost:3000,http://localhost:5000,http://localhost:5173,'
+        'http://127.0.0.1:3000,http://127.0.0.1:5000,http://127.0.0.1:5173'
+    ),
+    cast=Csv(),
 )
+# Auto-allow any Vercel preview / production frontend and Replit dev domains.
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://.*\.vercel\.app$",
+    r"^https://.*\.replit\.dev$",
+    r"^https://.*\.replit\.app$",
+]
 CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS) + [
+    'https://*.vercel.app', 'https://*.replit.dev', 'https://*.replit.app',
+]
 
 # DRF Spectacular (API Docs)
 SPECTACULAR_SETTINGS = {

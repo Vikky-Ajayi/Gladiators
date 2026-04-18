@@ -20,6 +20,32 @@ logger = logging.getLogger(__name__)
 PRO_PRICE_NAIRA = 5000  # ₦5,000/month for Pro
 
 
+def _resolve_frontend_origin(request) -> str:
+    """
+    Return the scheme://host that the frontend is running on, derived from the
+    actual incoming request — so the URLs we hand back are always reachable by
+    the caller. Falls back to FRONTEND_URL setting only when no headers help.
+
+    Order of preference:
+      1. Origin header                (set by browsers on CORS requests)
+      2. Referer header               (set on top-level navigations)
+      3. settings.FRONTEND_URL        (last-resort default)
+    """
+    from urllib.parse import urlparse
+
+    origin = (request.META.get("HTTP_ORIGIN") or "").strip()
+    if origin and origin.lower() not in ("null",):
+        return origin.rstrip("/")
+
+    referer = (request.META.get("HTTP_REFERER") or "").strip()
+    if referer:
+        parsed = urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+
+    return (getattr(settings, "FRONTEND_URL", "") or "").rstrip("/")
+
+
 # ─── Payment: Initialize ─────────────────────────────────────────────────────
 
 class PaymentConfigView(APIView):
@@ -64,13 +90,18 @@ class InitializePaymentView(APIView):
             metadata={"description": "Landrify Pro — unlimited scans + AI time-projection reports"},
         )
 
+        # Auto-detect the actual frontend origin from this request so the
+        # checkout URL we build is always reachable by the caller, regardless
+        # of where the frontend is deployed (localhost, Vercel, custom domain).
+        frontend_origin = _resolve_frontend_origin(request)
+
         isw    = InterswitchPaymentClient()
         result = isw.initialize_payment(
             amount_naira=amount,
             transaction_ref=reference,
             customer_email=user.email,
             customer_name=user.full_name or user.email,
-            redirect_url=settings.INTERSWITCH_REDIRECT_URL,
+            frontend_origin=frontend_origin,
         )
 
         if not result.get("status"):
