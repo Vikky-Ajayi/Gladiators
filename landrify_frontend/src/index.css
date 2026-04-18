@@ -17,13 +17,21 @@
 }
 
 @layer base {
+  html, body {
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
   body {
     @apply font-sans bg-landrify-bg text-landrify-ink antialiased;
   }
-  
+  #root {
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
   h1, h2, h3, h4 {
     @apply font-serif tracking-tight;
   }
+  img, video, canvas, svg { max-width: 100%; height: auto; }
 }
 
 @layer components {

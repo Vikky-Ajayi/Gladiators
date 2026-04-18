@@ -19,9 +19,17 @@ export function Pricing() {
     setLoadingPlan('pro');
     try {
       const res = await initializePayment();
+      if (!res?.authorization_url) {
+        throw new Error('No checkout URL was returned. Please try again.');
+      }
       window.location.href = res.authorization_url;
     } catch (e: any) {
-      setError(e?.response?.data?.error || e?.response?.data?.detail || 'Could not start payment.');
+      const detail =
+        e?.response?.data?.error ||
+        e?.response?.data?.detail ||
+        e?.userMessage ||
+        e?.message;
+      setError(detail || 'Could not start payment. Please try again or refresh the page.');
       setLoadingPlan(null);
     }
   };

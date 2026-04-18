@@ -21,7 +21,6 @@ export function ProfileModal({ open, onClose, user, onUpdated }: Props) {
   const [profileMsg, setProfileMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   const [nin, setNin] = useState('');
-  const [showNinInput, setShowNinInput] = useState(false);
   const [verifyingNin, setVerifyingNin] = useState(false);
   const [ninMsg, setNinMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
@@ -29,7 +28,6 @@ export function ProfileModal({ open, onClose, user, onUpdated }: Props) {
     if (user) {
       setFullName(user.full_name || '');
       setPhone(user.phone || '');
-      setShowNinInput(false);
       setNin('');
       setNinMsg(null);
       setProfileMsg(null);
@@ -56,17 +54,19 @@ export function ProfileModal({ open, onClose, user, onUpdated }: Props) {
       return;
     }
     setVerifyingNin(true);
+    // Simulated NIMC lookup delay so the UX matches a real verification call
+    const minDelay = new Promise((r) => setTimeout(r, 1800));
     try {
-      const res = await verifyNIN(nin);
+      const [res] = await Promise.all([verifyNIN(nin), minDelay]);
       if (res.nin_verified) {
-        setNinMsg({ type: 'ok', text: res.message || 'NIN verified.' });
-        setShowNinInput(false);
+        setNinMsg({ type: 'ok', text: res.message || 'NIN verified successfully.' });
+        setNin('');
         onUpdated();
       } else {
         setNinMsg({ type: 'err', text: res.error || 'Verification failed.' });
       }
     } catch (e: any) {
-      setNinMsg({ type: 'err', text: e?.response?.data?.error || 'Verification failed.' });
+      setNinMsg({ type: 'err', text: e?.response?.data?.error || e?.userMessage || 'Verification failed.' });
     } finally { setVerifyingNin(false); }
   };
 
@@ -145,49 +145,54 @@ export function ProfileModal({ open, onClose, user, onUpdated }: Props) {
 
                 {/* NIN row */}
                 <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-bold uppercase tracking-widest text-gray-500">NIN (National ID)</label>
-                    {user.nin_verified ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600">
-                        <BadgeCheck className="w-4 h-4" /> Verified
-                      </span>
-                    ) : (
-                      !showNinInput && (
-                        <button type="button" onClick={() => setShowNinInput(true)}
-                          className="text-xs font-bold text-landrify-green hover:underline">
-                          Verify
-                        </button>
-                      )
-                    )}
-                  </div>
-                  <div className="relative">
-                    <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    {user.nin_verified ? (
-                      <Input value={`••••••• ${user.nin_last_four ?? ''}`} disabled className="pl-11 bg-emerald-50/50 text-emerald-800 border-emerald-200" />
-                    ) : showNinInput ? (
-                      <Input
-                        value={nin}
-                        onChange={(e) => setNin(e.target.value.replace(/\D/g, '').slice(0, 11))}
-                        placeholder="11-digit NIN"
-                        inputMode="numeric"
-                        className="pl-11"
-                      />
-                    ) : (
-                      <Input value="Not verified" disabled className="pl-11 bg-gray-50 text-gray-400" />
-                    )}
-                  </div>
+                  <label className="text-[11px] font-bold uppercase tracking-widest text-gray-500">
+                    NIN (National Identity Number)
+                  </label>
 
-                  {showNinInput && !user.nin_verified && (
-                    <div className="flex gap-2 pt-1">
-                      <Button onClick={submitNin} disabled={verifyingNin || nin.length !== 11}
-                        className="px-5 py-2 h-10 text-sm">
-                        {verifyingNin ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Verifying…</> : 'Verify NIN'}
-                      </Button>
-                      <Button variant="ghost" onClick={() => { setShowNinInput(false); setNin(''); setNinMsg(null); }}
-                        className="px-4 py-2 h-10 text-sm">
-                        Cancel
-                      </Button>
+                  {user.nin_verified ? (
+                    <div className="relative">
+                      <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-600" />
+                      <Input
+                        value={`••••••• ${user.nin_last_four ?? ''}`}
+                        disabled
+                        className="pl-11 pr-28 bg-emerald-50/60 text-emerald-800 border-emerald-200 font-mono"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-white px-2 py-0.5 rounded-full border border-emerald-200">
+                        <BadgeCheck className="w-3.5 h-3.5" /> Verified
+                      </span>
                     </div>
+                  ) : (
+                    <>
+                      <div className="relative">
+                        <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <input
+                          type="text"
+                          value={nin}
+                          onChange={(e) => setNin(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                          placeholder="Enter your 11-digit NIN"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          disabled={verifyingNin}
+                          maxLength={11}
+                          className="w-full pl-11 pr-24 py-3 rounded-xl border border-gray-200 bg-white text-base font-mono tracking-wider focus:outline-none focus:ring-2 focus:ring-landrify-green/30 focus:border-landrify-green disabled:bg-gray-50 disabled:text-gray-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={submitNin}
+                          disabled={verifyingNin || nin.length !== 11}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 text-xs font-bold text-landrify-green hover:text-landrify-green-dark disabled:text-gray-300 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg hover:bg-landrify-green/5 transition"
+                        >
+                          {verifyingNin ? (
+                            <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Verifying…</>
+                          ) : (
+                            'Verify'
+                          )}
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-gray-400">
+                        We verify your NIN with NIMC. This is required to download official reports.
+                      </p>
+                    </>
                   )}
 
                   {ninMsg && (
