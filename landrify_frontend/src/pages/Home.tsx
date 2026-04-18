@@ -50,7 +50,7 @@ export function Home() {
                 <span className="text-[10px] font-mono font-bold uppercase tracking-[0.3em] text-landrify-green">AI-Powered Verification</span>
               </motion.div>
               
-              <h1 className="text-8xl md:text-[120px] font-serif font-light leading-[0.82] tracking-tighter text-landrify-ink mb-12">
+              <h1 className="md:text-[120px] font-serif font-light tracking-tighter text-landrify-ink mb-12 text-[100px]">
                 Secure Your <br />
                 <span className="italic font-medium text-landrify-green">Land</span> <br />
                 Legacy.
