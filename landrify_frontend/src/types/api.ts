@@ -2,14 +2,19 @@ export interface User {
   id: string;
   email: string;
   full_name: string;
+  phone?: string;
+  user_type?: string;
   plan: 'basic' | 'pro';
   is_pro: boolean;
   has_active_subscription?: boolean;
   can_scan: boolean;
   scans_remaining: number | 'unlimited';
+  basic_scan_used?: boolean;
   nin_verified: boolean;
+  nin_verified_at?: string | null;
   nin_last_four: string | null;
   pro_expires_at: string | null;
+  created_at?: string;
 }
 
 export interface ScanResult {
@@ -30,7 +35,7 @@ export interface ScanResult {
   environmental_risks: EnvironmentalRisks;
   elevation_meters: string | null;
   satellite_image_url: string | null;
-  ai_report: string; // Empty for basic, full markdown for pro
+  ai_report: string;
   ai_report_model: string;
   ai_report_tokens: number | null;
   report_generated: boolean;
@@ -59,9 +64,12 @@ export interface AuthResponse {
 
 export interface PaymentInitResponse {
   transaction_reference: string;
-  authorization_url: string; // Redirect user here
+  authorization_url: string;
   amount: number;
   currency: string;
+  plan?: string;
+  description?: string;
+  provider?: string;
 }
 
 export interface UpgradePrompt {

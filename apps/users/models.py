@@ -79,8 +79,17 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     @property
     def is_pro(self) -> bool:
-        """Pro access override: every authenticated user is treated as Pro."""
+        """User has an active Pro subscription."""
+        from django.utils import timezone
+        if self.plan != self.Plan.PRO:
+            return False
+        if self.pro_expires_at and self.pro_expires_at < timezone.now():
+            return False
         return True
+
+    @property
+    def has_active_subscription(self) -> bool:
+        return self.is_pro
 
     @property
     def can_scan(self) -> bool:
@@ -94,5 +103,6 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     @property
     def scans_remaining(self):
-        """Human-readable scan quota."""
-        return 'unlimited'
+        if self.is_pro:
+            return 'unlimited'
+        return 0 if self.basic_scan_used else 1

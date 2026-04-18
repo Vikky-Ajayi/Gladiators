@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { getMe } from '../api/auth';
 import type { User } from '../types/api';
 
@@ -7,27 +7,27 @@ export function useAuth() {
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState<string | null>(localStorage.getItem('landrify_token'));
 
-  useEffect(() => {
-    if (token) {
-      getMe()
-        .then((profile) =>
-          setUser({
-            ...profile,
-            is_pro: true,
-            can_scan: true,
-            scans_remaining: 'unlimited',
-            has_active_subscription: true,
-          }),
-        )
-        .catch(() => {
-          localStorage.removeItem('landrify_token');
-          setToken(null);
-        })
-        .finally(() => setLoading(false));
-    } else {
+  const refresh = useCallback(async () => {
+    if (!localStorage.getItem('landrify_token')) {
+      setUser(null);
+      setLoading(false);
+      return;
+    }
+    try {
+      const profile = await getMe();
+      setUser(profile);
+    } catch {
+      localStorage.removeItem('landrify_token');
+      setToken(null);
+      setUser(null);
+    } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
+
+  useEffect(() => {
+    if (token) refresh(); else setLoading(false);
+  }, [token, refresh]);
 
   const loginUser = (newToken: string) => {
     localStorage.setItem('landrify_token', newToken);
@@ -40,5 +40,5 @@ export function useAuth() {
     setUser(null);
   };
 
-  return { user, loading, token, loginUser, logoutUser, isAuthenticated: !!token };
+  return { user, loading, token, loginUser, logoutUser, refresh, isAuthenticated: !!token };
 }

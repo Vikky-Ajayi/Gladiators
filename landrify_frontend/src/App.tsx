@@ -12,6 +12,8 @@ import { HowItWorks } from './pages/HowItWorks';
 import { Pricing } from './pages/Pricing';
 import { About } from './pages/About';
 import { ScansHistory } from './pages/ScansHistory';
+import { PaymentCheckout } from './pages/PaymentCheckout';
+import { PaymentCallback } from './pages/PaymentCallback';
 import { useAuth } from './hooks/useAuth';
 
 const queryClient = new QueryClient();
@@ -78,6 +80,11 @@ export default function App() {
                   <ScanResult />
                 </ProtectedRoute>
               } 
+            />
+            <Route path="/payment/checkout" element={<PaymentCheckout />} />
+            <Route
+              path="/payment/callback"
+              element={<ProtectedRoute><PaymentCallback /></ProtectedRoute>}
             />
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" />} />

@@ -22,6 +22,19 @@ PRO_PRICE_NAIRA = 5000  # ₦5,000/month for Pro
 
 # ─── Payment: Initialize ─────────────────────────────────────────────────────
 
+class PaymentConfigView(APIView):
+    """GET /api/v1/payments/config/ — let the frontend know if we're in mock mode."""
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response({
+            "mock_mode":    bool(getattr(settings, "INTERSWITCH_PAYMENTS_MOCK_ACTIVE", True)),
+            "environment":  getattr(settings, "INTERSWITCH_ENV", "sandbox"),
+            "currency":     "NGN",
+            "pro_price":    settings.PRO_PRICE_NAIRA,
+        })
+
+
 class InitializePaymentView(APIView):
     """
     POST /api/v1/payments/initialize/
@@ -117,6 +130,52 @@ class VerifyPaymentView(APIView):
             })
 
         return Response({"status": "pending", "response_code": result.get("response_code")})
+
+
+# ─── Payment: Mock Confirm (simulated checkout submission) ────────────────────
+
+class MockConfirmPaymentView(APIView):
+    """
+    POST /api/v1/payments/mock-confirm/
+
+    Called by the simulated Interswitch checkout page (frontend) when the user
+    submits the demo card form. This endpoint is ONLY available when the app
+    is running in mock mode — when real Interswitch credentials are provided
+    the live gateway calls VerifyPaymentView/InterswitchRedirectView instead.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not getattr(settings, "INTERSWITCH_PAYMENTS_MOCK_ACTIVE", False):
+            return Response({"error": "Mock mode is disabled."}, status=status.HTTP_400_BAD_REQUEST)
+
+        reference = request.data.get("reference")
+        outcome   = (request.data.get("outcome") or "success").lower()
+        if not reference:
+            return Response({"error": "reference is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            payment = Payment.objects.get(payment_reference=reference, user=request.user)
+        except Payment.DoesNotExist:
+            return Response({"error": "Payment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if payment.status == "success":
+            return Response({"status": "success", "already_paid": True})
+
+        if outcome == "decline":
+            payment.status = "failed"
+            payment.save(update_fields=["status"])
+            return Response({"status": "failed", "response_code": "51",
+                             "message": "Card declined by issuer (simulated)."})
+
+        gateway_ref = f"MOCK-{reference[-8:]}"
+        _activate_pro(payment, {"gateway_ref": gateway_ref})
+        return Response({
+            "status":        "success",
+            "response_code": "00",
+            "gateway_ref":   gateway_ref,
+            "message":       "Approved by Financial Institution (simulated).",
+        })
 
 
 # ─── Payment: Interswitch Redirect Callback ───────────────────────────────────

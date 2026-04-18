@@ -49,19 +49,17 @@ class LoginSerializer(serializers.Serializer):
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
-    is_pro          = serializers.SerializerMethodField()
-    has_active_subscription = serializers.SerializerMethodField()
-    can_scan        = serializers.BooleanField(read_only=True)
+    is_pro = serializers.BooleanField(read_only=True)
+    has_active_subscription = serializers.BooleanField(read_only=True)
+    can_scan = serializers.BooleanField(read_only=True)
     scans_remaining = serializers.SerializerMethodField()
 
     class Meta:
-        model  = User
+        model = User
         fields = [
             'id', 'email', 'full_name', 'phone', 'user_type',
-            # Plan
             'plan', 'is_pro', 'has_active_subscription', 'pro_expires_at',
             'can_scan', 'scans_remaining', 'basic_scan_used',
-            # NIN verification
             'nin_verified', 'nin_verified_at', 'nin_last_four',
             'created_at',
         ]
@@ -71,12 +69,6 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'nin_verified', 'nin_verified_at', 'nin_last_four',
             'created_at',
         ]
-
-    def get_is_pro(self, _obj):
-        return True
-
-    def get_has_active_subscription(self, _obj):
-        return True
 
     def get_scans_remaining(self, obj):
         return obj.scans_remaining

@@ -150,8 +150,17 @@ REST_KNOX = {
 # ── URLs — 100% driven by environment variables, zero hardcoding ───────────────
 # FRONTEND_URL  → your React app (local: http://localhost:5173, prod: https://app.vercel.app)
 # API_BASE_URL  → this Django server (local: http://127.0.0.1:8000, prod: https://api.railway.app)
-FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5000')
 API_BASE_URL  = config('API_BASE_URL', default='http://127.0.0.1:8000')
+
+# Interswitch environment toggle: 'sandbox' or 'production'
+INTERSWITCH_ENV = config('INTERSWITCH_ENV', default='sandbox')
+
+# Mock mode — when no real credentials are configured we simulate the
+# Interswitch hosted checkout + NIN verification so the app is fully
+# usable in demos and development. Auto-on if creds are missing.
+MOCK_INTERSWITCH_PAYMENTS = config('MOCK_INTERSWITCH_PAYMENTS', default='', cast=str).lower() in ('1', 'true', 'yes')
+MOCK_INTERSWITCH_IDENTITY = config('MOCK_INTERSWITCH_IDENTITY', default='', cast=str).lower() in ('1', 'true', 'yes')
 
 # CORS — allow all in debug, use env var in production
 CORS_ALLOWED_ORIGINS = config(
@@ -198,6 +207,17 @@ INTERSWITCH_REDIRECT_URL  = config('INTERSWITCH_REDIRECT_URL', default=f'{FRONTE
 # Create a NEW PROJECT → select "NIN Verification" API → copy these credentials
 INTERSWITCH_IDENTITY_CLIENT_ID     = config('INTERSWITCH_IDENTITY_CLIENT_ID', default='')
 INTERSWITCH_IDENTITY_CLIENT_SECRET = config('INTERSWITCH_IDENTITY_CLIENT_SECRET', default='')
+
+# Auto-enable mock mode if real credentials aren't configured. When real
+# credentials are added later, set INTERSWITCH_ENV=production (or leave as
+# sandbox) and the same code paths will hit the live API.
+INTERSWITCH_PAYMENTS_MOCK_ACTIVE = MOCK_INTERSWITCH_PAYMENTS or not (
+    INTERSWITCH_CLIENT_ID and INTERSWITCH_CLIENT_SECRET
+    and INTERSWITCH_MERCHANT_CODE and INTERSWITCH_PAY_ITEM_ID
+)
+INTERSWITCH_IDENTITY_MOCK_ACTIVE = MOCK_INTERSWITCH_IDENTITY or not (
+    INTERSWITCH_IDENTITY_CLIENT_ID and INTERSWITCH_IDENTITY_CLIENT_SECRET
+)
 
 # Pricing (in Naira)
 # Basic plan: 1 free scan ever — basic risk report, no AI projections
