@@ -148,7 +148,7 @@ export function Pricing() {
               <Button
                 onClick={plan.onClick}
                 disabled={plan.disabled || loadingPlan === plan.key}
-                className={`w-full h-14 text-base ${plan.popular ? 'bg-landrify-green hover:bg-landrify-green-dark' : ''}`}
+                className={`w-full h-11 text-sm rounded-full ${plan.popular ? 'bg-landrify-green hover:bg-landrify-green-dark' : ''}`}
               >
                 {loadingPlan === plan.key ? (
                   <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Starting…</>

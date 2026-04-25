@@ -108,7 +108,7 @@ export function Login() {
 
             <Button 
               type="submit" 
-              className="w-full h-14 text-lg group"
+              className="w-full h-11 text-sm group"
               disabled={loading}
             >
               {loading ? 'Signing in...' : 'Sign In'}

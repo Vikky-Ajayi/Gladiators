@@ -142,7 +142,7 @@ export function Navbar() {
                       <span className="text-lg font-medium">Login</span>
                     </Link>
                     <Link to="/register" className="block">
-                      <Button className="w-full h-14 rounded-2xl shadow-lg shadow-landrify-green/20">
+                      <Button className="w-full h-11 rounded-full shadow-md shadow-landrify-green/20">
                         <UserPlus className="mr-2 w-5 h-5" strokeWidth={1.5} />
                         Get Started
                       </Button>

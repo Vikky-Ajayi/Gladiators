@@ -68,13 +68,13 @@ export function About() {
             className="flex flex-col sm:flex-row items-center justify-center gap-6"
           >
             <Link to="/register">
-              <Button className="h-16 px-10 text-lg rounded-2xl shadow-xl shadow-landrify-green/20 group">
+              <Button className="h-11 px-6 text-sm rounded-full shadow-md shadow-landrify-green/20 group">
                 Join the Revolution
                 <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
               </Button>
             </Link>
             <Link to="/how-it-works">
-              <Button variant="outline" className="h-16 px-10 text-lg rounded-2xl border-gray-200">
+              <Button variant="outline" className="h-11 px-6 text-sm rounded-full border-gray-200">
                 See How it Works
               </Button>
             </Link>
@@ -130,7 +130,7 @@ export function About() {
                 Today, Landrify is used by individual investors, real estate firms, and legal professionals to verify thousands of land parcels across the country.
               </p>
               <Link to="/register">
-                <Button className="h-16 px-10 text-lg rounded-2xl group">
+                <Button className="h-11 px-6 text-sm rounded-full group">
                   Start Verifying Today
                   <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
                 </Button>
@@ -164,7 +164,7 @@ export function About() {
             Join the <span className="italic">thousands</span> of secure investors.
           </h2>
           <Link to="/register">
-            <Button className="h-20 px-16 text-xl bg-landrify-green hover:bg-landrify-green/90 rounded-2xl shadow-2xl shadow-landrify-green/20 group">
+            <Button className="h-12 px-8 text-base bg-landrify-green hover:bg-landrify-green/90 rounded-full shadow-lg shadow-landrify-green/20 group">
               Get Started Now
               <ArrowRight className="ml-3 w-6 h-6 group-hover:translate-x-2 transition-transform" />
             </Button>

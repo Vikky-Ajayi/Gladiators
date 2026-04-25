@@ -15,7 +15,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           variant === "primary" && "bg-landrify-green text-white hover:bg-landrify-green-dark shadow-sm",
           variant === "outline" && "border border-landrify-green text-landrify-green hover:bg-landrify-green/5",
           variant === "ghost" && "hover:bg-gray-100 text-gray-700",
-          "px-8 py-3",
+          "px-5 py-2 h-10",
           className
         )}
         ref={ref}

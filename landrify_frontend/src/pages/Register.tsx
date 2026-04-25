@@ -168,7 +168,7 @@ export function Register() {
 
               <Button 
                 type="submit" 
-                className="w-full h-14 text-lg group mt-4"
+                className="w-full h-11 text-sm group mt-4"
                 disabled={loading}
               >
                 {loading ? 'Creating Account...' : 'Create Account'}

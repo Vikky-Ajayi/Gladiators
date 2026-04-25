@@ -94,7 +94,7 @@ export function Dashboard() {
           <p className="text-gray-500 font-light tracking-wide">Manage your land verifications and risk assessments.</p>
         </div>
         <Link to="/scan/new">
-          <Button className="h-14 px-8 group rounded-2xl shadow-xl shadow-landrify-green/20">
+          <Button className="h-11 px-6 group rounded-full shadow-md shadow-landrify-green/20">
             <Plus className="mr-2 w-5 h-5" strokeWidth={1.5} />
             New Land Scan
           </Button>
@@ -139,7 +139,7 @@ export function Dashboard() {
                   />
                 </div>
                 <Link to="/scan/new">
-                  <Button className="w-full h-20 text-xl rounded-2xl shadow-xl shadow-landrify-green/20 group">
+                  <Button className="w-full h-12 text-base rounded-full shadow-md shadow-landrify-green/20 group">
                     Start AI Scan
                     <Search className="ml-3 w-6 h-6 group-hover:scale-110 transition-transform" strokeWidth={1.5} />
                   </Button>
@@ -264,7 +264,7 @@ export function Dashboard() {
             </div>
             <h4 className="text-2xl font-serif font-medium mb-4">Pro Access Active</h4>
             <p className="text-gray-600 font-light mb-8 leading-relaxed text-sm">Your account has full access enabled, including premium scan and report features.</p>
-            <Button className="w-full h-14 rounded-2xl shadow-lg shadow-landrify-green/10">Plan Active</Button>
+            <Button className="w-full h-11 rounded-full shadow-md shadow-landrify-green/10">Plan Active</Button>
           </div>
 
           {/* Resources */}

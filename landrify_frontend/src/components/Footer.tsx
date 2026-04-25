@@ -23,7 +23,7 @@ export function Footer() {
             <p className="text-landrify-ink/80 font-light text-lg">Join thousands of smart investors who use Landrify to verify their real estate acquisitions in Nigeria.</p>
           </div>
           <Link to="/register">
-            <Button className="h-20 px-12 text-xl bg-landrify-ink text-white hover:bg-landrify-ink/90 rounded-2xl shadow-2xl group">
+            <Button className="h-12 px-8 text-base bg-landrify-ink text-white hover:bg-landrify-ink/90 rounded-full shadow-lg group">
               Get Started Now
               <ArrowRight className="ml-3 w-6 h-6 group-hover:translate-x-2 transition-transform" />
             </Button>
