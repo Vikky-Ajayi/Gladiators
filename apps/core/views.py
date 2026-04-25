@@ -233,3 +233,22 @@ class DemoScanView(APIView):
         }
 
         return Response(response_data, status=status.HTTP_201_CREATED)
+
+
+class PublicConfigView(APIView):
+    """
+    GET /api/v1/config/
+
+    Returns the small set of public, client-safe configuration values the
+    Landrify frontend needs (Mapbox public token, whether Google sign-in is
+    available, etc). Public — no auth required. Never returns secrets.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        return Response({
+            'mapbox_token': getattr(settings, 'MAPBOX_TOKEN', '') or '',
+            'google_client_id': getattr(settings, 'GOOGLE_CLIENT_ID', '') or '',
+            'test_mode': bool(getattr(settings, 'TEST_MODE', False)),
+        })

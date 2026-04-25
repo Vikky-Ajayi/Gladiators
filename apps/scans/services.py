@@ -520,3 +520,52 @@ def run_land_scan(scan, full_report: bool = False) -> dict:
         'elevation': elevation,
         'ai_report_status': ai_result.get('status'),
     }
+
+
+# ─── Forward Geocoding (address → coordinates) ────────────────────────────────
+
+def forward_geocode(query: str, limit: int = 6) -> list[dict]:
+    """
+    Forward-geocode an address using Nominatim, restricted to Nigeria.
+    Returns up to `limit` matches: [{label, latitude, longitude, type, state, lga}]
+    """
+    try:
+        time.sleep(0.5)
+        response = requests.get(
+            'https://nominatim.openstreetmap.org/search',
+            params={
+                'q': query,
+                'format': 'json',
+                'addressdetails': 1,
+                'limit': max(1, min(limit, 10)),
+                'countrycodes': 'ng',
+            },
+            headers=NOMINATIM_HEADERS,
+            timeout=10,
+        )
+        if response.status_code != 200:
+            return []
+        out = []
+        for item in response.json():
+            try:
+                lat = float(item['lat']); lng = float(item['lon'])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not (4.0 <= lat <= 14.0 and 2.5 <= lng <= 15.0):
+                continue
+            addr = item.get('address', {})
+            state = (addr.get('state') or '').replace(' State', '').strip()
+            lga = addr.get('county') or addr.get('city') or addr.get('town') or addr.get('village') or addr.get('city_district') or ''
+            out.append({
+                'label': item.get('display_name', f"{lat}, {lng}"),
+                'latitude': lat,
+                'longitude': lng,
+                'type': item.get('type', ''),
+                'state': state,
+                'lga': lga,
+                'place_id': item.get('place_id'),
+            })
+        return out
+    except Exception as e:
+        logger.error(f"Nominatim forward geocode error: {e}")
+        return []

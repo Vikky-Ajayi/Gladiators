@@ -49,9 +49,26 @@ templates/          - Django HTML templates
 - `DJANGO_SECRET_KEY` - Django secret key
 - `DEBUG` - Enable Django debug mode
 - `GROQ_API_KEY` - For AI report generation (optional for dev with TEST_MODE=true)
-- `MAPBOX_TOKEN` - For satellite map imagery
+- `MAPBOX_TOKEN` - For satellite map imagery (also exposed to the frontend via `/api/v1/config/`)
 - `INTERSWITCH_CLIENT_ID/SECRET` - Payment gateway credentials
+- `GOOGLE_CLIENT_ID` - Google OAuth client ID for Sign in with Google (optional)
+- `VITE_GOOGLE_CLIENT_ID` - Same value, required at frontend build time for the Google Identity script
 - `TEST_MODE` - Set to `true` to bypass payment/Pro gates in development
+
+## Notable Endpoints
+
+- `GET  /api/v1/config/` — public client config (mapbox token, google client id, test mode)
+- `POST /api/v1/auth/google/` — exchange a Google ID token for a Knox token
+- `GET  /api/v1/scans/geocode/?q=...` — Nominatim forward geocoder, Nigeria-bounded
+- `GET  /api/v1/scans/reverse-geocode/?lat=&lng=` — reverse geocoder
+
+## Scan UX
+
+The `NewScan` page (`landrify_frontend/src/pages/NewScan.tsx`) offers five input
+methods (address search, GPS, map pin, quick picks, manual coordinates) with a
+live Mapbox satellite preview and a circular overlay sized by Nigerian land
+units (half-plot, plot, acre, hectare, etc.). The selected unit is converted
+into an equivalent disc radius before being sent to the backend.
 
 ## Setup Commands
 

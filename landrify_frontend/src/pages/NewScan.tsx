@@ -1,48 +1,84 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { MapPin, Navigation, Search, AlertCircle, X } from 'lucide-react';
+import {
+  MapPin, Navigation, Search, AlertCircle, X, Crosshair, Layers, Loader2,
+  Sparkles, ChevronRight, Compass,
+} from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { createScan, demoScan } from '../api/scans';
+import { createScan, demoScan, geocodeAddress, reverseGeocode, type GeocodeResult } from '../api/scans';
 import type { ScanResult } from '../types/api';
+import { MapPreview } from '../components/MapPreview';
 
-const quickLocations = [
-  { label: 'Lekki, Lagos', latitude: 6.4698, longitude: 3.5852 },
-  { label: 'Maitama, Abuja', latitude: 9.082, longitude: 7.492 },
-  { label: 'Ibeju-Lekki', latitude: 6.41, longitude: 3.91 },
-  { label: 'Port Harcourt', latitude: 4.8156, longitude: 7.0498 },
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const QUICK_LOCATIONS = [
+  { label: 'Lekki, Lagos',    sub: 'Coastal — high flood risk',   latitude: 6.4698, longitude: 3.5852 },
+  { label: 'Maitama, Abuja',  sub: 'FCT — federal land',          latitude: 9.082,  longitude: 7.492  },
+  { label: 'Ibeju-Lekki',     sub: 'Free Trade Zone overlap',     latitude: 6.41,   longitude: 3.91   },
+  { label: 'Port Harcourt',   sub: 'Niger Delta — tidal flooding',latitude: 4.8156, longitude: 7.0498 },
+  { label: 'Onitsha, Anambra',sub: 'Niger River floodplain',      latitude: 6.1500, longitude: 6.7833 },
+  { label: 'Lokoja, Kogi',    sub: 'Niger-Benue confluence',      latitude: 7.8023, longitude: 6.7333 },
 ] as const;
 
-const riskLevelColors: Record<string, string> = {
+/**
+ * Nigerian land-area presets translated into a circular scan radius.
+ * Areas are in m² → equivalent disc radius = √(area / π) / 1000 (km).
+ * "Plot" follows the Lagos State standard 60ft × 120ft (~648 m²); a half-plot
+ * is the colloquial "small plot" sometimes sold in the south-west.
+ */
+const RADIUS_PRESETS: Array<{ key: string; label: string; sub: string; km: number }> = [
+  { key: 'half-plot', label: 'Half plot',  sub: '~324 m²',     km: 0.020 },
+  { key: 'plot',      label: '1 plot',     sub: '~648 m² (60×120 ft)', km: 0.030 },
+  { key: '2-plots',   label: '2 plots',    sub: '~1,296 m²',   km: 0.040 },
+  { key: 'half-acre', label: 'Half acre',  sub: '~2,023 m²',   km: 0.060 },
+  { key: 'acre',      label: '1 acre',     sub: '~4,047 m² (≈6 plots)', km: 0.080 },
+  { key: 'hectare',   label: '1 hectare',  sub: '10,000 m² (≈15 plots)', km: 0.130 },
+  { key: '5-hectare', label: '5 hectares', sub: '50,000 m²',   km: 0.300 },
+  { key: 'estate',    label: 'Small estate', sub: '~12 hectares', km: 0.500 },
+  { key: 'district',  label: 'District-level', sub: 'Up to 3 km', km: 1.000 },
+];
+
+const RISK_COLORS: Record<string, string> = {
   low: '#4ade80',
   medium: '#fbbf24',
   high: '#fb923c',
   critical: '#f87171',
+  very_high: '#f87171',
   unknown: '#d1d5db',
 };
 
-const radiusRing = 70;
-const circumference = 2 * Math.PI * radiusRing;
+const RING_R = 70;
+const RING_C = 2 * Math.PI * RING_R;
 
-type GpsStatus = 'idle' | 'loading' | 'success' | 'error';
+type ScanMethod = 'address' | 'gps' | 'map' | 'quick' | 'manual';
+
+const TABS: Array<{ key: ScanMethod; label: string; icon: any; help: string }> = [
+  { key: 'address', label: 'Address',    icon: Search,    help: 'Type a street, area or landmark' },
+  { key: 'gps',     label: 'My location', icon: Crosshair, help: 'Use your phone’s GPS' },
+  { key: 'map',     label: 'Pick on map', icon: Layers,    help: 'Drop a pin on the satellite' },
+  { key: 'quick',   label: 'Quick picks', icon: Sparkles,  help: 'Try a popular Nigerian location' },
+  { key: 'manual',  label: 'Coordinates', icon: Compass,   help: 'Paste latitude / longitude' },
+];
 
 function formatRiskLevel(level?: string | null) {
-  return (level ?? 'unknown').toUpperCase();
+  return (level ?? 'unknown').replace('_', ' ').toUpperCase();
 }
 
-function InlineResult({ result }: { result: ScanResult }) {
-  const riskScore = typeof result.risk_score === 'number' ? result.risk_score : 0;
-  const ringColor = riskLevelColors[result.risk_level] ?? riskLevelColors.unknown;
-  const strokeDashoffset = circumference - (Math.max(0, Math.min(riskScore, 100)) / 100) * circumference;
+// ── Inline result card (unchanged shape from before) ──────────────────────────
 
+function InlineResult({ result }: { result: ScanResult }) {
+  const score = typeof result.risk_score === 'number' ? result.risk_score : 0;
+  const ringColor = RISK_COLORS[result.risk_level] ?? RISK_COLORS.unknown;
+  const dashOffset = RING_C - (Math.max(0, Math.min(score, 100)) / 100) * RING_C;
   return (
-    <div className="space-y-8 mt-10">
+    <div className="space-y-6 mt-10">
       <div className="bg-white rounded-3xl border border-landrify-line shadow-lg p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-sm text-gray-500">{result.scan_reference}</p>
-            <h2 className="text-3xl font-serif text-landrify-ink mt-1">{result.address}</h2>
+            <h2 className="text-2xl md:text-3xl font-serif text-landrify-ink mt-1">{result.address}</h2>
             <p className="text-gray-600 mt-1">{result.lga}, {result.state}</p>
           </div>
           <span className="px-4 py-1 rounded-full text-sm font-semibold bg-landrify-green/10 text-landrify-green">
@@ -62,21 +98,12 @@ function InlineResult({ result }: { result: ScanResult }) {
       <div className="bg-white rounded-3xl border border-landrify-line shadow-lg p-8 flex flex-col items-center">
         <div className="relative w-44 h-44">
           <svg className="w-full h-full -rotate-90">
-            <circle cx="88" cy="88" r={radiusRing} fill="none" stroke="#e5e7eb" strokeWidth="12" />
-            <circle
-              cx="88"
-              cy="88"
-              r={radiusRing}
-              fill="none"
-              stroke={ringColor}
-              strokeWidth="12"
-              strokeDasharray={circumference}
-              strokeDashoffset={strokeDashoffset}
-              strokeLinecap="round"
-            />
+            <circle cx="88" cy="88" r={RING_R} fill="none" stroke="#e5e7eb" strokeWidth="12" />
+            <circle cx="88" cy="88" r={RING_R} fill="none" stroke={ringColor}
+              strokeWidth="12" strokeDasharray={RING_C} strokeDashoffset={dashOffset} strokeLinecap="round" />
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-4xl font-bold text-landrify-ink">{riskScore}</span>
+            <span className="text-4xl font-bold text-landrify-ink">{score}</span>
             <span className="text-xs tracking-widest text-gray-500">RISK SCORE</span>
           </div>
         </div>
@@ -88,30 +115,25 @@ function InlineResult({ result }: { result: ScanResult }) {
           <h3 className="text-xl font-serif">Legal Status</h3>
           {result.legal_status.is_government_land ? (
             <p className="text-red-600 font-semibold">
-              ⚠️ GOVERNMENT ACQUISITION AREA{result.legal_status.authority ? ` — ${result.legal_status.authority}` : ''}
+              ⚠️ GOVERNMENT ACQUISITION AREA
+              {result.legal_status.authority ? ` — ${result.legal_status.authority}` : ''}
             </p>
           ) : (
-            <p className="text-green-600 font-semibold"> No government acquisition records found</p>
+            <p className="text-green-600 font-semibold">No government acquisition records found</p>
           )}
           {result.legal_status.gazette_reference && (
             <p className="text-sm text-gray-700">Gazette: {result.legal_status.gazette_reference}</p>
           )}
           {result.legal_status.notes && <p className="text-sm text-gray-500">{result.legal_status.notes}</p>}
         </div>
-
         <div className="bg-white rounded-3xl border border-landrify-line shadow-lg p-6 space-y-3">
           <h3 className="text-xl font-serif">Environmental</h3>
-          <p>
-            <span className="font-semibold">Flood Risk:</span>{' '}
-            {formatRiskLevel(result.environmental_risks.flood.risk_level)}
-          </p>
+          <p><span className="font-semibold">Flood Risk:</span> {formatRiskLevel(result.environmental_risks.flood.risk_level)}</p>
           <p className="text-sm text-gray-500">{result.environmental_risks.flood.zone_name}</p>
+          <p><span className="font-semibold">Erosion Risk:</span> {formatRiskLevel(result.environmental_risks.erosion.risk_level)}</p>
           <p>
-            <span className="font-semibold">Erosion Risk:</span>{' '}
-            {formatRiskLevel(result.environmental_risks.erosion.risk_level)}
-          </p>
-          <p>
-            <span className="font-semibold">Nearest Dam:</span> {result.environmental_risks.dam_proximity.nearest_dam}{' '}
+            <span className="font-semibold">Nearest Dam:</span>{' '}
+            {result.environmental_risks.dam_proximity.nearest_dam}{' '}
             ({result.environmental_risks.dam_proximity.distance_km}km away)
           </p>
           <p><span className="font-semibold">Elevation:</span> {result.elevation_meters ?? 'N/A'}m above sea level</p>
@@ -121,296 +143,375 @@ function InlineResult({ result }: { result: ScanResult }) {
   );
 }
 
+// ── Main NewScan page ─────────────────────────────────────────────────────────
+
 export function NewScan() {
   const navigate = useNavigate();
+
+  const [tab, setTab] = useState<ScanMethod>('address');
+  const [latitude, setLat] = useState<number | null>(null);
+  const [longitude, setLng] = useState<number | null>(null);
+  const [address, setAddress] = useState<string>('');
+  const [pickedLabel, setPickedLabel] = useState<string>('');
+  const [accuracy, setAccuracy] = useState<number | null>(null);
+
+  const [radiusKey, setRadiusKey] = useState<string>('plot');
+  const radiusKm = useMemo(
+    () => RADIUS_PRESETS.find((p) => p.key === radiusKey)?.km ?? 0.030,
+    [radiusKey],
+  );
+
   const [loading, setLoading] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [latitude, setLatitude] = useState<string>('');
-  const [longitude, setLongitude] = useState<string>('');
-  const [radiusKm, setRadiusKm] = useState<number>(0.5);
   const [demoResult, setDemoResult] = useState<ScanResult | null>(null);
-  const [gpsStatus, setGpsStatus] = useState<GpsStatus>('idle');
-  const [gpsErrorMessage, setGpsErrorMessage] = useState<string | null>(null);
-  const [geoAccuracy, setGeoAccuracy] = useState<number | null>(null);
-  const [flashCoordinates, setFlashCoordinates] = useState(false);
 
-  const coordinateReady = useMemo(() => latitude.trim() !== '' && longitude.trim() !== '', [latitude, longitude]);
-
-  useEffect(() => {
-    if (gpsStatus !== 'success') return;
-    const timer = window.setTimeout(() => {
-      setGpsStatus('idle');
-    }, 4000);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [gpsStatus]);
+  // ── Address search ──
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<GeocodeResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const debounceRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!flashCoordinates) return;
-    const timer = window.setTimeout(() => setFlashCoordinates(false), 1000);
-    return () => window.clearTimeout(timer);
-  }, [flashCoordinates]);
+    if (tab !== 'address') return;
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    if (query.trim().length < 3) { setResults([]); return; }
+    setSearching(true);
+    debounceRef.current = window.setTimeout(async () => {
+      try {
+        const data = await geocodeAddress(query.trim(), 6);
+        setResults(data.results);
+      } catch {
+        setResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 350);
+    return () => { if (debounceRef.current) window.clearTimeout(debounceRef.current); };
+  }, [query, tab]);
 
-  const useCurrentLocation = () => {
+  const pickResult = (r: GeocodeResult) => {
+    setLat(r.latitude); setLng(r.longitude);
+    setAddress(r.label);
+    setPickedLabel(r.label.split(',').slice(0, 3).join(', '));
     setError(null);
-    setGpsErrorMessage(null);
-    setGpsStatus('loading');
+    setResults([]);
+    setQuery(r.label.split(',').slice(0, 2).join(', '));
+  };
 
-    if (!navigator.geolocation) {
-      setGpsStatus('error');
-      setGpsErrorMessage('Geolocation is not supported by your browser.');
+  // ── GPS ──
+  const [gpsBusy, setGpsBusy] = useState(false);
+  const useGps = () => {
+    setError(null); setGpsBusy(true);
+    if (!('geolocation' in navigator)) {
+      setGpsBusy(false);
+      setError('Geolocation is not supported by your browser.');
       return;
     }
-
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLatitude(position.coords.latitude.toFixed(6));
-        setLongitude(position.coords.longitude.toFixed(6));
-        setGeoAccuracy(Math.round(position.coords.accuracy));
-        setFlashCoordinates(true);
-        setGpsStatus('success');
+      async (pos) => {
+        setLat(pos.coords.latitude); setLng(pos.coords.longitude);
+        setAccuracy(Math.round(pos.coords.accuracy));
+        try {
+          const r = await reverseGeocode(pos.coords.latitude, pos.coords.longitude);
+          setAddress(r.display_name);
+          setPickedLabel(`${r.lga ?? ''}${r.lga && r.state ? ', ' : ''}${r.state ?? ''}`);
+        } catch { /* address optional */ }
+        setGpsBusy(false);
       },
-      (geoError) => {
-        setGpsStatus('error');
-        setGpsErrorMessage(geoError.message);
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      (e) => { setGpsBusy(false); setError(e.message || 'Could not read your location.'); },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     );
   };
 
-  const handleScan = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setDemoResult(null);
-
-    if (!coordinateReady) {
-      setError('Please provide both latitude and longitude.');
-      return;
-    }
-
-    const lat = Number.parseFloat(latitude);
-    const lng = Number.parseFloat(longitude);
-
-    if (Number.isNaN(lat) || Number.isNaN(lng)) {
-      setError('Latitude and longitude must be valid numbers.');
-      return;
-    }
-
+  // ── Map pick ──
+  const onMapPick = async (lat: number, lng: number) => {
+    setLat(lat); setLng(lng); setError(null);
     try {
-      setLoading(true);
-      const response = await createScan({ latitude: lat, longitude: lng, radius_km: radiusKm });
-      navigate(`/scan/${response.id}`);
+      const r = await reverseGeocode(lat, lng);
+      setAddress(r.display_name);
+      setPickedLabel(`${r.lga ?? ''}${r.lga && r.state ? ', ' : ''}${r.state ?? ''}`);
+    } catch { /* optional */ }
+  };
+
+  // ── Quick pick ──
+  const pickQuick = (q: typeof QUICK_LOCATIONS[number]) => {
+    setLat(q.latitude); setLng(q.longitude);
+    setAddress(q.label); setPickedLabel(q.label);
+    setError(null);
+  };
+
+  // ── Manual ──
+  const [manualLat, setManualLat] = useState('');
+  const [manualLng, setManualLng] = useState('');
+  const applyManual = () => {
+    const la = parseFloat(manualLat), ln = parseFloat(manualLng);
+    if (Number.isNaN(la) || Number.isNaN(ln)) { setError('Enter valid latitude and longitude.'); return; }
+    if (la < 4 || la > 14 || ln < 2.5 || ln > 15) {
+      setError('Coordinates appear outside Nigeria (lat 4–14, lng 2.5–15).');
+      return;
+    }
+    setLat(la); setLng(ln); setAddress(`${la.toFixed(5)}, ${ln.toFixed(5)}`);
+    setPickedLabel('Manual coordinates'); setError(null);
+  };
+
+  // ── Submit ──
+  const ready = latitude != null && longitude != null;
+
+  const submit = async () => {
+    if (!ready) { setError('Pick a location first.'); return; }
+    setLoading(true); setError(null);
+    try {
+      const result = await createScan({ latitude: latitude!, longitude: longitude!, radius_km: radiusKm });
+      navigate(`/scans/${result.id}`);
     } catch (err: any) {
-      const status = err.response?.status;
-      if (status === 401) {
-        navigate('/login');
-        return;
-      }
-      if (status === 402) {
-        setError('You have used your 1 free scan. Upgrade to Pro for unlimited scans.');
-        return;
-      }
-      setError(err.response?.data?.error || err.response?.data?.detail || 'Unable to initiate scan.');
+      setError(err?.response?.data?.error || err?.userMessage || 'Failed to create scan.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDemoScan = async () => {
-    setError(null);
-    setDemoResult(null);
+  const tryDemo = async () => {
+    setDemoLoading(true); setError(null);
     try {
-      setDemoLoading(true);
-      const response = await demoScan('lekki_high_flood');
-      setDemoResult(response);
-    } catch (err: any) {
-      setError(err.response?.data?.error || err.response?.data?.detail || 'Unable to run demo scan.');
-    } finally {
-      setDemoLoading(false);
-    }
+      const r = await demoScan('lekki');
+      setDemoResult(r);
+    } catch (e: any) {
+      setError(e?.response?.data?.error || 'Demo scan failed.');
+    } finally { setDemoLoading(false); }
   };
 
+  // ── Render ──
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-      <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-12">
-        <h1 className="text-5xl md:text-6xl font-serif font-light text-gray-900 mb-5">
-          New <span className="italic font-medium">Verification</span>
-        </h1>
-        <p className="text-xl text-gray-600 font-light max-w-2xl mx-auto">
-          Scan land by GPS, preset coordinates, or manual latitude/longitude entry.
+    <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white py-12">
+      <div className="max-w-6xl mx-auto px-4 lg:px-6">
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+          className="flex items-center gap-3 mb-2">
+          <Link to="/dashboard" className="text-sm text-gray-500 hover:text-landrify-green inline-flex items-center gap-1">
+            ← Dashboard
+          </Link>
+        </motion.div>
+
+        <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+          className="text-4xl md:text-5xl font-serif text-landrify-ink mb-2">
+          Run a new scan
+        </motion.h1>
+        <p className="text-gray-500 mb-10 max-w-2xl">
+          Choose how you want to locate the parcel — address search, GPS, drop a pin on
+          the satellite map, or paste raw coordinates. Then pick a Nigerian land-area preset
+          and start the scan.
         </p>
-      </motion.div>
 
-      <div className="glass-card p-8 rounded-[2.5rem] shadow-2xl border-white/40 bg-white/60">
-        <form onSubmit={handleScan} className="space-y-7">
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" onClick={useCurrentLocation} variant="outline" className="rounded-2xl h-12 px-5" disabled={gpsStatus === 'loading'}>
-                {gpsStatus === 'loading' ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2"></div>
-                    Getting your location...
-                  </>
-                ) : (
-                  <>
-                    <Navigation className="mr-2 w-4 h-4" />
-                    Use My Current Location
-                  </>
-                )}
-              </Button>
+        <div className="grid lg:grid-cols-[1.05fr_1fr] gap-8">
+          {/* ── LEFT: scan input ── */}
+          <div className="bg-white border border-landrify-line rounded-3xl shadow-sm overflow-hidden">
+            {/* Tabs */}
+            <div className="flex flex-wrap gap-1 border-b border-landrify-line/70 bg-gray-50/60 px-2 pt-2">
+              {TABS.map((t) => {
+                const Icon = t.icon;
+                const active = tab === t.key;
+                return (
+                  <button
+                    key={t.key}
+                    onClick={() => { setTab(t.key); setError(null); }}
+                    className={
+                      'group flex items-center gap-2 px-3.5 py-2.5 rounded-t-xl text-sm transition-colors ' +
+                      (active
+                        ? 'bg-white text-landrify-green font-semibold border border-b-white border-landrify-line'
+                        : 'text-gray-500 hover:text-gray-800')
+                    }
+                  >
+                    <Icon className="w-4 h-4" /> {t.label}
+                  </button>
+                );
+              })}
             </div>
 
-            {gpsStatus === 'loading' && (
-              <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-              Locating you... Please allow location access if prompted by your browser.
-              </div>
-            )}
+            <div className="p-6 md:p-8 space-y-6">
+              <p className="text-sm text-gray-500 -mt-2">{TABS.find((x) => x.key === tab)?.help}</p>
 
-            {gpsStatus === 'success' && (
-              <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-                 Location found — coordinates filled in below.
-              </div>
-            )}
+              {/* ── ADDRESS ── */}
+              {tab === 'address' && (
+                <div className="space-y-3">
+                  <div className="relative">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+                    <Input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="e.g. Admiralty Way, Lekki Phase 1"
+                      className="pl-12 h-12"
+                    />
+                    {searching && <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-gray-400" />}
+                  </div>
+                  {results.length > 0 && (
+                    <div className="rounded-2xl border border-landrify-line divide-y divide-gray-100 max-h-72 overflow-y-auto">
+                      {results.map((r) => (
+                        <button
+                          key={`${r.place_id ?? `${r.latitude}-${r.longitude}`}`}
+                          onClick={() => pickResult(r)}
+                          className="w-full text-left px-4 py-3 hover:bg-emerald-50 transition-colors group"
+                        >
+                          <div className="flex items-start gap-2">
+                            <MapPin className="w-4 h-4 text-landrify-green mt-1 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-gray-900 truncate">{r.label}</p>
+                              <p className="text-[11px] text-gray-500 mt-0.5">
+                                {(r.state || 'Nigeria')} · {r.latitude.toFixed(4)}, {r.longitude.toFixed(4)}
+                              </p>
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-landrify-green" />
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {!searching && query.length >= 3 && results.length === 0 && (
+                    <p className="text-xs text-gray-500">No matches found in Nigeria. Try a more specific area.</p>
+                  )}
+                </div>
+              )}
 
-            {gpsStatus === 'error' && gpsErrorMessage && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-start justify-between gap-3">
-                <p>⚠️ Could not get location: {gpsErrorMessage}. Please enter coordinates manually or use a quick-fill button below.</p>
-                <button
-                  type="button"
-                  onClick={() => setGpsStatus('idle')}
-                  className="text-amber-700 hover:text-amber-900"
-                  aria-label="Dismiss GPS error"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            )}
-          </div>
+              {/* ── GPS ── */}
+              {tab === 'gps' && (
+                <div className="space-y-3">
+                  <Button onClick={useGps} disabled={gpsBusy} className="w-full h-12">
+                    {gpsBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Navigation className="w-4 h-4" />}
+                    <span className="ml-2">{gpsBusy ? 'Locating you…' : 'Use my current location'}</span>
+                  </Button>
+                  {accuracy != null && (
+                    <p className="text-xs text-gray-500">GPS accuracy ±{accuracy} m. For survey-grade results, walk to the centre of the parcel before tapping.</p>
+                  )}
+                </div>
+              )}
 
-          <div>
-            <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Quick Fill Locations</p>
-            <div className="grid sm:grid-cols-2 gap-3">
-              {quickLocations.map((item) => (
-                <Button
-                  key={item.label}
-                  type="button"
-                  variant="ghost"
-                  className="justify-start rounded-2xl border border-gray-200 h-12"
-                  onClick={() => {
-                    setLatitude(item.latitude.toFixed(6));
-                    setLongitude(item.longitude.toFixed(6));
-                    setGpsStatus('idle');
-                    setGeoAccuracy(null);
-                    setGpsErrorMessage(null);
-                    setError(null);
-                  }}
-                >
-                  <MapPin className="mr-2 w-4 h-4" /> {item.label}
+              {/* ── MAP ── */}
+              {tab === 'map' && (
+                <div className="space-y-2 text-sm text-gray-600">
+                  <p>Click anywhere on the satellite map on the right to drop a pin. Click again to move it.</p>
+                </div>
+              )}
+
+              {/* ── QUICK ── */}
+              {tab === 'quick' && (
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {QUICK_LOCATIONS.map((q) => (
+                    <button
+                      key={q.label}
+                      onClick={() => pickQuick(q)}
+                      className="text-left rounded-2xl border border-landrify-line px-4 py-3 hover:border-landrify-green hover:bg-emerald-50/40 transition-colors"
+                    >
+                      <p className="text-sm font-medium text-gray-900">{q.label}</p>
+                      <p className="text-[11px] text-gray-500 mt-0.5">{q.sub}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* ── MANUAL ── */}
+              {tab === 'manual' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <Input value={manualLat} onChange={(e) => setManualLat(e.target.value)} placeholder="Latitude (e.g. 6.4698)" />
+                  <Input value={manualLng} onChange={(e) => setManualLng(e.target.value)} placeholder="Longitude (e.g. 3.5852)" />
+                  <Button onClick={applyManual} variant="outline" className="col-span-2 h-11">
+                    Use these coordinates
+                  </Button>
+                </div>
+              )}
+
+              {/* ── Selected location pill ── */}
+              {ready && (
+                <div className="flex items-start gap-3 rounded-2xl bg-emerald-50/60 border border-emerald-100 px-4 py-3">
+                  <MapPin className="w-5 h-5 text-landrify-green mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-emerald-900 truncate">{pickedLabel || 'Selected location'}</p>
+                    <p className="text-[11px] text-emerald-700 font-mono mt-0.5">
+                      {latitude!.toFixed(5)}, {longitude!.toFixed(5)}
+                    </p>
+                    {address && address !== pickedLabel && (
+                      <p className="text-[11px] text-emerald-700/80 truncate mt-0.5">{address}</p>
+                    )}
+                  </div>
+                  <button onClick={() => { setLat(null); setLng(null); setAddress(''); setPickedLabel(''); setAccuracy(null); }}
+                    className="text-emerald-700 hover:text-emerald-900" aria-label="Clear">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              {/* ── Radius presets ── */}
+              <div>
+                <div className="flex items-baseline justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-gray-900">Plot size</h3>
+                  <span className="text-[11px] text-gray-500">
+                    Scan radius: {(radiusKm * 1000).toFixed(0)} m
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 mb-3">
+                  Pick the closest standard Nigerian land-area unit. We use this to draw the scan circle around your location.
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {RADIUS_PRESETS.map((p) => {
+                    const active = radiusKey === p.key;
+                    return (
+                      <button
+                        key={p.key}
+                        onClick={() => setRadiusKey(p.key)}
+                        className={
+                          'text-left rounded-xl border px-3 py-2.5 text-sm transition-colors ' +
+                          (active
+                            ? 'border-landrify-green bg-landrify-green/5 ring-1 ring-landrify-green/40'
+                            : 'border-landrify-line hover:border-landrify-green/40 hover:bg-emerald-50/40')
+                        }
+                      >
+                        <p className={'font-medium ' + (active ? 'text-landrify-green' : 'text-gray-900')}>{p.label}</p>
+                        <p className="text-[10.5px] text-gray-500">{p.sub}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* ── Errors ── */}
+              {error && (
+                <div className="flex items-start gap-2 rounded-xl bg-red-50 border border-red-100 text-red-700 text-sm px-4 py-3">
+                  <AlertCircle className="w-4 h-4 mt-0.5" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              {/* ── Submit ── */}
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Button onClick={submit} disabled={!ready || loading} className="flex-1 h-12">
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                  <span className="ml-2">{loading ? 'Running scan…' : 'Run land scan'}</span>
                 </Button>
-              ))}
-            </div>
-            
-            
-          </div>
-
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-bold uppercase tracking-widest text-gray-400 ml-2">Latitude</label>
-              <Input
-                type="number"
-                step="0.000001"
-                inputMode="decimal"
-                value={latitude}
-                onChange={(e) => setLatitude(e.target.value)}
-                placeholder="6.469800"
-                className={`h-14 rounded-2xl transition-all duration-700 ${flashCoordinates ? 'bg-green-50 border-green-300 ring-1 ring-green-200' : ''}`}
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold uppercase tracking-widest text-gray-400 ml-2">Longitude</label>
-              <Input
-                type="number"
-                step="0.000001"
-                inputMode="decimal"
-                value={longitude}
-                onChange={(e) => setLongitude(e.target.value)}
-                placeholder="3.585200"
-                className={`h-14 rounded-2xl transition-all duration-700 ${flashCoordinates ? 'bg-green-50 border-green-300 ring-1 ring-green-200' : ''}`}
-              />
+                <Button onClick={tryDemo} variant="outline" disabled={demoLoading} className="sm:w-48 h-12">
+                  {demoLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  <span className="ml-2">{demoLoading ? 'Loading…' : 'Try a demo'}</span>
+                </Button>
+              </div>
             </div>
           </div>
 
-          {geoAccuracy !== null && (
-            <p className="text-sm text-gray-500">
-              Accuracy: ±{geoAccuracy}m{geoAccuracy > 100 ? ' — Move outside for better accuracy' : ''}
-            </p>
-          )}
-
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-bold uppercase tracking-widest text-gray-400 ml-2">Radius (km)</label>
-              <span className="text-sm text-gray-700">{radiusKm.toFixed(1)} km</span>
-            </div>
-            <Input
-              type="range"
-              min={0.1}
-              max={10}
-              step={0.1}
-              value={radiusKm}
-              onChange={(e) => setRadiusKm(Number.parseFloat(e.target.value))}
-              className="h-3 rounded-full px-0"
+          {/* ── RIGHT: live map preview ── */}
+          <div className="space-y-4">
+            <MapPreview
+              latitude={latitude}
+              longitude={longitude}
+              radiusKm={radiusKm}
+              onPick={tab === 'map' ? onMapPick : undefined}
+              className="shadow-sm border border-landrify-line"
             />
-            <Input
-              type="number"
-              min={0.1}
-              max={10}
-              step={0.1}
-              value={radiusKm}
-              onChange={(e) => setRadiusKm(Number.parseFloat(e.target.value) || 0.1)}
-              className="h-12 rounded-2xl mt-3"
-            />
-          </div>
-
-          {error && (
-            <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700 text-sm">
-              {error}{' '}
-              {error.includes('Upgrade to Pro') && (
-                <Link className="underline font-semibold" to="/pricing">Go to pricing</Link>
-              )}
+            <div className="text-xs text-gray-500 px-1">
+              {tab === 'map'
+                ? 'Tap anywhere on the map to drop a pin.'
+                : 'The map updates automatically as you pick a location.'}
             </div>
-          )}
-
-          <div className="grid sm:grid-cols-2 gap-4">
-            <Button type="submit" className="w-full h-16 text-lg group rounded-3xl" disabled={loading}>
-              {loading ? (
-                <div className="flex items-center space-x-3">
-                  <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white"></div>
-                  <span>Initiating Scan...</span>
-                </div>
-              ) : (
-                <div className="flex items-center">
-                  <span>Initiate Verification Scan</span>
-                  <Search className="ml-3 w-5 h-5 group-hover:scale-110 transition-transform" />
-                </div>
-              )}
-            </Button>
-
-            <Button type="button" variant="outline" className="w-full h-16 text-lg rounded-3xl" onClick={handleDemoScan} disabled={demoLoading}>
-              {demoLoading ? 'Running Demo Scan...' : 'Demo Scan'}
-            </Button>
           </div>
-        </form>
-      </div>
+        </div>
 
-      <div className="mt-8 flex items-center justify-center space-x-2 text-gray-400 text-sm">
-        <AlertCircle size={16} />
-        <p>Need unlimited scans? <Link to="/pricing" className="text-landrify-green font-bold hover:underline">Upgrade plan</Link></p>
+        {demoResult && <InlineResult result={demoResult} />}
       </div>
-
-      {demoResult && <InlineResult result={demoResult} />}
     </div>
   );
 }

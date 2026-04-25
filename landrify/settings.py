@@ -196,6 +196,11 @@ SPECTACULAR_SETTINGS = {
 # Mapbox — satellite imagery (FREE, no card: account.mapbox.com/auth/signup)
 MAPBOX_TOKEN = config('MAPBOX_TOKEN', default='')
 
+# Google Identity Services (Sign-In) — get a Web Client ID from
+# https://console.cloud.google.com/apis/credentials and add the frontend
+# origin (e.g. http://localhost:5000) to the Authorized JavaScript origins.
+GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default='')
+
 # ── Test / Development flags ───────────────────────────────────────────────────
 # TEST_MODE=True → bypass Pro gate, unlimited scans, full AI report
 # MUST be False in production

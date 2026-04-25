@@ -4,7 +4,7 @@ import { motion } from 'motion/react';
 import { CheckCircle2, XCircle, Loader2, ArrowRight, RefreshCcw } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { useAuth } from '../hooks/useAuth';
-import { setDemoPro } from '../lib/demoState';
+import { activatePro } from '../api/auth';
 
 export function PaymentCallback() {
   const { refresh } = useAuth();
@@ -24,7 +24,7 @@ export function PaymentCallback() {
       await new Promise((r) => setTimeout(r, 1200));
       if (cancelled) return;
       if (status === 'success' || status === 'successful' || status === 'approved') {
-        setDemoPro();
+        await activatePro().catch(() => { /* TEST_MODE may be off */ });
         await refresh().catch(() => { /* backend optional */ });
         setState('success');
         setMessage('Pro is now active on your account. Enjoy unlimited scans.');

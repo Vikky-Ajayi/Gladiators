@@ -9,6 +9,7 @@ import { Input } from '../components/ui/Input';
 import { ShieldCheck, Mail, Lock, User, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { register as registerApi } from '../api/auth';
 import { useAuth } from '../hooks/useAuth';
+import { GoogleSignInButton } from '../components/GoogleSignInButton';
 
 const registerSchema = z.object({
   full_name: z.string().min(2, 'Full name is required'),
@@ -174,6 +175,14 @@ export function Register() {
                 {!loading && <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />}
               </Button>
             </form>
+
+            <div className="my-6 flex items-center gap-3 text-[11px] uppercase tracking-widest text-gray-400">
+              <div className="h-px flex-1 bg-gray-200" /> or <div className="h-px flex-1 bg-gray-200" />
+            </div>
+            <GoogleSignInButton
+              onAuthenticated={(token) => { loginUser(token); navigate('/dashboard'); }}
+              text="signup_with"
+            />
 
             <div className="mt-8 text-center">
               <p className="text-sm text-gray-500">

@@ -1,3 +1,5 @@
+import logging
+from django.conf import settings
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
@@ -12,6 +14,8 @@ from .serializers import (
     RegisterSerializer, LoginSerializer,
     UserProfileSerializer, UpdateProfileSerializer, ChangePasswordSerializer
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RegisterView(APIView):
@@ -55,6 +59,84 @@ class LoginView(APIView):
             'user': UserProfileSerializer(user).data,
             'token': token,
         })
+
+
+class GoogleAuthView(APIView):
+    """
+    POST /api/v1/auth/google/
+
+    Body: { "credential": "<Google ID token>" }
+
+    Verifies a Google ID token (issued by Google Identity Services on the
+    client) and returns a Knox token for an existing or newly created user.
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        token_str = (request.data.get('credential')
+                     or request.data.get('id_token')
+                     or '').strip()
+        if not token_str:
+            return Response(
+                {'error': 'Missing Google credential.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        client_id = getattr(settings, 'GOOGLE_CLIENT_ID', '') or ''
+        if not client_id:
+            return Response(
+                {'error': 'Google sign-in is not configured on the server. '
+                          'Set GOOGLE_CLIENT_ID in the environment.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        try:
+            from google.oauth2 import id_token as google_id_token
+            from google.auth.transport import requests as google_requests
+            payload = google_id_token.verify_oauth2_token(
+                token_str,
+                google_requests.Request(),
+                client_id,
+                clock_skew_in_seconds=10,
+            )
+        except Exception as e:
+            logger.warning(f"Google ID token verification failed: {e}")
+            return Response(
+                {'error': 'Invalid Google credential.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        if payload.get('aud') != client_id:
+            return Response({'error': 'Invalid audience.'}, status=status.HTTP_401_UNAUTHORIZED)
+        if not payload.get('email_verified'):
+            return Response({'error': 'Google account email is not verified.'},
+                            status=status.HTTP_401_UNAUTHORIZED)
+
+        email = User.objects.normalize_email((payload.get('email') or '').strip().lower())
+        full_name = (payload.get('name') or '').strip()
+
+        user = User.objects.filter(email__iexact=email).first()
+        created = False
+        if user is None:
+            user = User.objects.create_user(
+                email=email,
+                full_name=full_name,
+                user_type=User.UserType.INDIVIDUAL,
+            )
+            user.set_unusable_password()
+            user.save(update_fields=['password'])
+            created = True
+        elif full_name and not user.full_name:
+            user.full_name = full_name
+            user.save(update_fields=['full_name'])
+
+        _, token = AuthToken.objects.create(user)
+        return Response({
+            'user': UserProfileSerializer(user).data,
+            'token': token,
+            'created': created,
+            'provider': 'google',
+        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
 class LogoutView(KnoxLogoutView):

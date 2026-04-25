@@ -5,7 +5,7 @@ import {
   X, ChevronRight, CreditCard, Building2, Wallet, Smartphone, ArrowUpRight,
   Loader2, CheckCircle2, AlertCircle, ArrowLeft, Calendar, Lock,
 } from 'lucide-react';
-import { setDemoPro } from '../lib/demoState';
+import { activatePro } from '../api/auth';
 import { InterswitchLogo, InterswitchMark } from '../components/InterswitchLogo';
 import {
   VisaBadge, VerifiedByVisaBadge, MastercardSecureCodeBadge, VerveSafetokenBadge,
@@ -75,8 +75,11 @@ export function PaymentCheckout() {
     setError(null);
     if (otp.length < 4) { setError('Please enter the OTP sent to your phone.'); return; }
     setStep('processing');
-    await new Promise((r) => setTimeout(r, 1700));
-    setDemoPro();
+    try {
+      await activatePro();
+    } catch {
+      /* TEST_MODE may be off in production — fall through to callback */
+    }
     setStep('done');
     setTimeout(() => goCallback('success'), 950);
   };

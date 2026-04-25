@@ -9,6 +9,7 @@ import { Input } from '../components/ui/Input';
 import { ShieldCheck, Mail, Lock, ArrowRight, AlertCircle } from 'lucide-react';
 import { login } from '../api/auth';
 import { useAuth } from '../hooks/useAuth';
+import { GoogleSignInButton } from '../components/GoogleSignInButton';
 
 const loginSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -114,6 +115,14 @@ export function Login() {
               {!loading && <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />}
             </Button>
           </form>
+
+          <div className="my-6 flex items-center gap-3 text-[11px] uppercase tracking-widest text-gray-400">
+            <div className="h-px flex-1 bg-gray-200" /> or <div className="h-px flex-1 bg-gray-200" />
+          </div>
+          <GoogleSignInButton
+            onAuthenticated={(token) => { loginUser(token); navigate('/dashboard'); }}
+            text="signin_with"
+          />
 
           <div className="mt-10 text-center">
             <p className="text-sm text-gray-500">

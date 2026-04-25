@@ -3,8 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X, User as UserIcon, Mail, Phone, ShieldCheck, BadgeCheck, Loader2, CheckCircle2, AlertCircle, Crown } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
-import { updateMe } from '../api/auth';
-import { setDemoNinVerified } from '../lib/demoState';
+import { updateMe, verifyNin } from '../api/auth';
 import type { User } from '../types/api';
 
 interface Props {
@@ -54,19 +53,22 @@ export function ProfileModal({ open, onClose, user, onUpdated }: Props) {
       return;
     }
     setVerifyingNin(true);
-    // Simulated NIMC lookup delay so the UX matches a real verification call
-    await new Promise((r) => setTimeout(r, 1800));
-    // Demo rule: NINs starting with five zeros fail. Anything else succeeds.
-    if (nin.startsWith('00000')) {
-      setNinMsg({ type: 'err', text: 'NIN not found in NIMC database. Please check the number.' });
+    try {
+      await verifyNin(nin);
+      setNinMsg({ type: 'ok', text: 'NIN verified successfully with NIMC.' });
+      setNin('');
+      onUpdated();
+    } catch (e: any) {
+      setNinMsg({
+        type: 'err',
+        text:
+          e?.response?.data?.detail ||
+          e?.response?.data?.error ||
+          'NIN verification failed. Please check the number and try again.',
+      });
+    } finally {
       setVerifyingNin(false);
-      return;
     }
-    setDemoNinVerified(nin);
-    setNinMsg({ type: 'ok', text: 'NIN verified successfully with NIMC.' });
-    setNin('');
-    setVerifyingNin(false);
-    onUpdated();
   };
 
   return (

@@ -16,6 +16,9 @@ Sourced from:
 """
 from django.core.management.base import BaseCommand
 from apps.scans.models import FloodRiskZone, AcquisitionArea, Dam
+from apps.core.management.commands._seed_extra import (
+    EXTRA_FLOOD_ZONES, EXTRA_DAMS, EXTRA_ACQUISITIONS,
+)
 
 FLOOD_ZONES = [
     {'zone_name':'Lekki-Victoria Island Coastal Flood Zone','risk_level':'very_high','state':'Lagos','lga':'Eti-Osa','min_lat':6.4200,'max_lat':6.5500,'min_lng':3.3800,'max_lng':3.7200,'flood_type':'coastal','peak_months':'June-October','data_source':'NIHSA AFO 2023 / Lagos State Ministry of Environment','last_major_flood_year':2022,'notes':'Low-lying coastal barrier island with average elevation of 2-4m. Highly susceptible to tidal surge, coastal flooding, and sea-level rise. Experienced severe flooding in 2012 (worst in 50 years). IPCC projects 3-4mm/year sea level rise in Gulf of Guinea. Entire Lekki Peninsula is at existential risk by 2050 under high-emission scenarios.'},
@@ -106,8 +109,13 @@ ACQUISITION_AREAS = [
 ]
 
 
+FLOOD_ZONES = FLOOD_ZONES + EXTRA_FLOOD_ZONES
+DAMS = DAMS + EXTRA_DAMS
+ACQUISITION_AREAS = ACQUISITION_AREAS + EXTRA_ACQUISITIONS
+
+
 class Command(BaseCommand):
-    help = 'Seed comprehensive Nigerian land risk data (50+ flood zones, 22 dams, 13 acquisition areas)'
+    help = 'Seed comprehensive Nigerian land risk data (~125 flood zones, ~45 dams, ~40 acquisition areas)'
 
     def add_arguments(self, parser):
         parser.add_argument('--dry-run', action='store_true', help='Preview counts without writing')

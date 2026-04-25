@@ -27,6 +27,9 @@ reportlab>=4.0
 # LLM — Groq (core product: AI time-projection report)
 groq>=0.9
 
+# Google Identity Services (Google Sign-In ID-token verification)
+google-auth>=2.30
+
 # Production server
 gunicorn>=21.0
 

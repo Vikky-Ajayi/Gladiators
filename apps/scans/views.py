@@ -209,3 +209,95 @@ def _interpret(score):
     if score < 50:    return "Moderate risk. Proceed with thorough verification."
     if score < 75:    return "High risk. Seek professional advice before proceeding."
     return "Critical risk. Do not purchase without expert legal review."
+
+
+# ─── Saved Lands ──────────────────────────────────────────────────────────────
+
+from .models import SavedLand
+from .serializers import SavedLandSerializer, SavedLandCreateSerializer
+
+
+class SavedLandListCreateView(APIView):
+    """GET / POST  /api/v1/saved-lands/ — list or save a land scan"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        saved = SavedLand.objects.filter(user=request.user).select_related('land_scan')
+        return Response({'results': SavedLandSerializer(saved, many=True).data, 'count': saved.count()})
+
+    def post(self, request):
+        serializer = SavedLandCreateSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        saved = serializer.save()
+        return Response(SavedLandSerializer(saved).data, status=status.HTTP_201_CREATED)
+
+
+class SavedLandDetailView(APIView):
+    """GET / PUT / DELETE  /api/v1/saved-lands/:id/"""
+    permission_classes = [IsAuthenticated]
+
+    def _get(self, request, saved_id):
+        return SavedLand.objects.filter(id=saved_id, user=request.user).first()
+
+    def get(self, request, saved_id):
+        saved = self._get(request, saved_id)
+        if not saved:
+            return Response({'error': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(SavedLandSerializer(saved).data)
+
+    def put(self, request, saved_id):
+        saved = self._get(request, saved_id)
+        if not saved:
+            return Response({'error': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        for f in ('custom_name', 'notes', 'alert_enabled'):
+            if f in request.data:
+                setattr(saved, f, request.data[f])
+        saved.save()
+        return Response(SavedLandSerializer(saved).data)
+
+    def delete(self, request, saved_id):
+        saved = self._get(request, saved_id)
+        if not saved:
+            return Response({'error': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        saved.delete()
+        return Response({'message': 'Removed from saved lands.'})
+
+
+# ─── Geocoding (forward, reverse) — proxied to Nominatim ─────────────────────
+
+from rest_framework.permissions import AllowAny
+
+
+class ForwardGeocodeView(APIView):
+    """
+    GET /api/v1/scans/geocode/?q=address
+    Forward-geocode an address to coordinates (Nigeria-bounded).
+    Public endpoint — used to power the address search box on /scan/new.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        q = (request.query_params.get('q') or '').strip()
+        if len(q) < 3:
+            return Response({'error': 'Query must be at least 3 characters.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from .services import forward_geocode
+        results = forward_geocode(q, limit=int(request.query_params.get('limit', 6)))
+        return Response({'query': q, 'results': results})
+
+
+class ReverseGeocodeView(APIView):
+    """GET /api/v1/scans/reverse-geocode/?lat=...&lng=..."""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        try:
+            lat = float(request.query_params.get('lat'))
+            lng = float(request.query_params.get('lng'))
+        except (TypeError, ValueError):
+            return Response({'error': 'Provide numeric lat & lng.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from .services import get_location_info
+        return Response(get_location_info(lat, lng))

@@ -1,5 +1,0 @@
-{
-  "name": "Landrify",
-  "description": "AI-powered land verification and risk assessment platform for Nigeria.",
-  "requestFramePermissions": ["geolocation"]
-}
