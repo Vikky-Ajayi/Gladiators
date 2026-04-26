@@ -16,6 +16,9 @@ Sourced from:
 """
 from django.core.management.base import BaseCommand
 from apps.scans.models import FloodRiskZone, AcquisitionArea, Dam
+from apps.core.management.commands._seed_massive import (
+    MASSIVE_DAMS, MASSIVE_FLOOD_ZONES, MASSIVE_ACQUISITIONS,
+)
 from apps.core.management.commands._seed_extra import (
     EXTRA_FLOOD_ZONES, EXTRA_DAMS, EXTRA_ACQUISITIONS,
 )
@@ -109,9 +112,9 @@ ACQUISITION_AREAS = [
 ]
 
 
-FLOOD_ZONES = FLOOD_ZONES + EXTRA_FLOOD_ZONES
-DAMS = DAMS + EXTRA_DAMS
-ACQUISITION_AREAS = ACQUISITION_AREAS + EXTRA_ACQUISITIONS
+FLOOD_ZONES = FLOOD_ZONES + EXTRA_FLOOD_ZONES + MASSIVE_FLOOD_ZONES
+DAMS = DAMS + EXTRA_DAMS + MASSIVE_DAMS
+ACQUISITION_AREAS = ACQUISITION_AREAS + EXTRA_ACQUISITIONS + MASSIVE_ACQUISITIONS
 
 
 class Command(BaseCommand):

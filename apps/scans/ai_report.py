@@ -169,6 +169,44 @@ Composite:
 - Overall risk level:            {scan_data.get('risk_level') or 'Unknown'}
 """
 
+    # ── Weather & climate (Open-Meteo, per-scan) ────────────────────
+    cur = scan_data.get('weather_current') or {}
+    hist = scan_data.get('weather_historical') or {}
+    proj = scan_data.get('weather_projection') or {}
+    horizons = (proj.get('horizons') or {}) if isinstance(proj, dict) else {}
+
+    def _delta(a, b):
+        if a is None or b is None:
+            return 'n/a'
+        d = round(a - b, 2)
+        return f"{'+' if d >= 0 else ''}{d}"
+
+    weather_block = f"""
+WEATHER & CLIMATE DATA (Open-Meteo, per-coordinate)
+Now (Africa/Lagos):
+- Temperature:                   {cur.get('temperature_c', 'Unknown')} °C (feels {cur.get('apparent_c', 'Unknown')} °C)
+- Humidity:                      {cur.get('humidity_pct', 'Unknown')} %
+- Wind:                          {cur.get('wind_kph', 'Unknown')} km/h
+- Precipitation last hour:       {cur.get('precipitation_mm', 'Unknown')} mm
+- Forecast 7d max temps:         {cur.get('forecast_7d', {}).get('temp_max_c') if cur else 'n/a'}
+- Forecast 7d rainfall (mm):     {cur.get('forecast_7d', {}).get('rainfall_mm') if cur else 'n/a'}
+
+Historical (ERA5 reanalysis, {hist.get('period', 'n/a')}):
+- 1990s baseline mean temp:      {hist.get('baseline_temp_c', 'n/a')} °C
+- Recent 10-year mean temp:      {hist.get('recent_temp_c', 'n/a')} °C
+- Δ Temperature shift:           {_delta(hist.get('recent_temp_c'), hist.get('baseline_temp_c'))} °C
+- 1990s baseline annual rain:    {hist.get('baseline_rain_mm', 'n/a')} mm
+- Recent 10-year annual rain:    {hist.get('recent_rain_mm', 'n/a')} mm
+
+CMIP6 multi-model projections (point-level, Open-Meteo Climate API):
+- 2030 horizon mean temp:        {horizons.get('2030', {}).get('temp_mean_c', 'n/a')} °C; rain {horizons.get('2030', {}).get('annual_rain_mm', 'n/a')} mm/yr
+- 2050 horizon mean temp:        {horizons.get('2050', {}).get('temp_mean_c', 'n/a')} °C; rain {horizons.get('2050', {}).get('annual_rain_mm', 'n/a')} mm/yr
+- (Open-Meteo CMIP6 horizons cap at 2050 — beyond-2050 projections rely on coarser IPCC AR6 scenarios.)
+
+Plain-English summary:
+{scan_data.get('weather_summary') or '(weather data unavailable)'}
+"""
+
     climate_block = """
 NIGERIA CLIMATE & MACRO CONTEXT (for projection modelling)
 - Two-season climate: rainy April–October, dry November–March; rainy season intensifying.
@@ -191,6 +229,7 @@ Use ONLY the data below — do not invent unsupported figures. Where data is mis
 {location_block}
 {legal_block}
 {env_block}
+{weather_block}
 {climate_block}
 
 Generate a detailed STRUCTURED REPORT in clean Markdown with EXACTLY these sections (use ## headings):

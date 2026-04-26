@@ -1,0 +1,87 @@
+Integrate the Open-Meteo API into the Landrify risk engine. Open-Meteo is completely free and requires no API key. All requests are plain HTTP GET calls.
+Three endpoints to integrate, all in apps/scans/services.py:
+
+Function 1 — get_current_weather(lat, lng)
+Call:
+GET https://api.open-meteo.com/v1/forecast
+?latitude={lat}&longitude={lng}
+&current=temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,weather_code
+&timezone=Africa/Lagos
+Return a dict with:
+python{
+    'temperature_c': float,
+    'humidity_percent': float,
+    'precipitation_mm': float,
+    'wind_speed_kmh': float,
+    'weather_code': int,
+}
+
+Function 2 — get_historical_weather(lat, lng, years=10)
+Call:
+GET https://archive-api.open-meteo.com/v1/archive
+?latitude={lat}&longitude={lng}
+&start_date={today - years years}
+&end_date={today}
+&daily=precipitation_sum,temperature_2m_max,temperature_2m_min
+&timezone=Africa/Lagos
+Process the daily arrays to return:
+python{
+    'avg_annual_rainfall_mm': float,       # mean of yearly precipitation totals
+    'rainfall_trend': 'increasing' | 'stable' | 'decreasing',  # compare first half vs second half of period
+    'avg_max_temp_c': float,
+    'temp_trend': 'warming' | 'stable' | 'cooling',
+    'years_analysed': int,
+    'wettest_year': int,
+    'driest_year': int,
+}
+To calculate trend: split the daily data into two halves chronologically, compare the average rainfall of the first half to the second half. If second half is more than 10% higher → increasing. If more than 10% lower → decreasing. Otherwise → stable.
+
+Function 3 — get_climate_projection(lat, lng)
+Call:
+GET https://climate-api.open-meteo.com/v1/climate
+?latitude={lat}&longitude={lng}
+&start_date=2024-01-01
+&end_date=2050-12-31
+&models=CMIP6
+&daily=precipitation_sum,temperature_2m_max
+&timezone=Africa/Lagos
+Process into decade averages and return:
+python{
+    'projection_2030': {'avg_rainfall_mm': float, 'avg_max_temp_c': float},
+    'projection_2040': {'avg_rainfall_mm': float, 'avg_max_temp_c': float},
+    'projection_2050': {'avg_rainfall_mm': float, 'avg_max_temp_c': float},
+    'rainfall_change_by_2050_percent': float,   # % change vs current baseline
+    'temp_change_by_2050_c': float,             # degrees change vs current baseline
+    'model': 'CMIP6',
+}
+
+Integrate into run_land_scan():
+Call all three functions after the elevation call. Wrap each in its own try/except so a failure in one does not break the scan — just return None for that section:
+pythonweather_current    = get_current_weather(lat, lng)
+weather_historical = get_historical_weather(lat, lng, years=10)
+weather_projection = get_climate_projection(lat, lng)
+Store the results on the scan model. Add these fields to the LandScan model if they don't exist:
+pythonweather_current    = models.JSONField(null=True, blank=True)
+weather_historical = models.JSONField(null=True, blank=True)
+weather_projection = models.JSONField(null=True, blank=True)
+Run python manage.py makemigrations and python manage.py migrate after adding fields.
+
+Pass weather data into the Groq AI prompt:
+In apps/scans/ai_report.py, add the weather data to the prompt context. Include:
+
+Current conditions summary
+Historical rainfall trend (increasing/stable/decreasing) and the actual mm figure
+Temperature trend
+Climate projections for 2030, 2040, 2050 with the % rainfall change and degree temperature change
+
+Tell Groq explicitly in the system prompt: "Use the provided historical weather data and CMIP6 climate projections to make the time-based risk projections data-driven and specific to this location. Reference actual rainfall figures and temperature trends in your analysis."
+
+Update the scan API response:
+In apps/scans/serializers.py, add a weather section to the scan output:
+json"weather": {
+    "current": { ... },
+    "historical": { ... },
+    "projection": { ... }
+}
+
+No API key needed anywhere. No new packages needed — use the requests library already installed. All three Open-Meteo endpoints are public and free with no rate limit for reasonable usage.

@@ -179,6 +179,68 @@ export function ScanResult() {
             </section>
           </div>
 
+          {(data.weather_current || data.weather_historical || data.weather_projection) && (
+            <section className="bg-white rounded-3xl border border-landrify-line shadow-lg p-6">
+              <div className="flex items-baseline justify-between flex-wrap gap-2 mb-4">
+                <h3 className="text-2xl font-serif">Weather &amp; Climate</h3>
+                <span className="text-[11px] text-gray-500">Open-Meteo · ERA5 reanalysis · CMIP6 projections</span>
+              </div>
+
+              <div className="grid sm:grid-cols-3 gap-4">
+                {data.weather_current && (
+                  <div className="rounded-2xl border border-landrify-line p-4">
+                    <p className="text-xs uppercase tracking-widest text-gray-500">Now</p>
+                    <p className="text-3xl font-bold text-landrify-ink mt-1">
+                      {data.weather_current.temperature_c ?? '—'}°C
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Feels {data.weather_current.apparent_c ?? '—'}°C · {data.weather_current.humidity_pct ?? '—'}% humidity
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Wind {data.weather_current.wind_kph ?? '—'} km/h
+                    </p>
+                  </div>
+                )}
+                {data.weather_historical && (
+                  <div className="rounded-2xl border border-landrify-line p-4">
+                    <p className="text-xs uppercase tracking-widest text-gray-500">
+                      Trend ({data.weather_historical.period})
+                    </p>
+                    <p className="text-3xl font-bold text-landrify-ink mt-1">
+                      {data.weather_historical.recent_temp_c ?? '—'}°C
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      vs {data.weather_historical.baseline_temp_c ?? '—'}°C in 1990s
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Rain: {data.weather_historical.recent_rain_mm ?? '—'} mm/yr
+                    </p>
+                  </div>
+                )}
+                {data.weather_projection?.horizons?.['2050'] && (
+                  <div className="rounded-2xl border border-landrify-orange/30 bg-landrify-orange/5 p-4">
+                    <p className="text-xs uppercase tracking-widest text-gray-500">2050 outlook (CMIP6)</p>
+                    <p className="text-3xl font-bold text-landrify-ink mt-1">
+                      {data.weather_projection.horizons['2050'].temp_mean_c ?? '—'}°C
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      ~{data.weather_projection.horizons['2050'].annual_rain_mm ?? '—'} mm/yr rainfall
+                    </p>
+                    {data.weather_projection.horizons['2080'] && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        2080: {data.weather_projection.horizons['2080'].temp_mean_c ?? '—'}°C
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {data.weather_summary && (
+                <p className="mt-4 text-sm text-gray-600 leading-relaxed">{data.weather_summary}</p>
+              )}
+            </section>
+          )}
+
           <section className="bg-white border border-gray-200 rounded-2xl p-6 text-[1.02rem] max-w-4xl">
             <h3 className="text-2xl font-serif mb-3">AI Report</h3>
             {data.ai_report && data.ai_report.trim().length > 0 ? (

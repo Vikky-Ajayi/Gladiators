@@ -158,6 +158,15 @@ class LandScan(models.Model):
     # ── Terrain ───────────────────────────────────────────────────────
     elevation_meters = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
 
+    # ── Weather & Climate (Open-Meteo) ────────────────────────────────
+    # current  →  live snapshot at scan time
+    # historical → 30-year ERA5 climatology summary
+    # projection → CMIP6 multi-model 2030/2050/2080 outlook
+    weather_current    = models.JSONField(null=True, blank=True)
+    weather_historical = models.JSONField(null=True, blank=True)
+    weather_projection = models.JSONField(null=True, blank=True)
+    weather_summary    = models.TextField(blank=True)
+
     # ── AI Report (Groq — core product) ──────────────────────────────
     ai_report        = models.TextField(blank=True)           # Full markdown time-projection report
     ai_report_model  = models.CharField(max_length=100, blank=True)

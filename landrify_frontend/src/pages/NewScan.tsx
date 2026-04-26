@@ -23,22 +23,29 @@ const QUICK_LOCATIONS = [
 ] as const;
 
 /**
- * Nigerian land-area presets translated into a circular scan radius.
- * Areas are in m² → equivalent disc radius = √(area / π) / 1000 (km).
- * "Plot" follows the Lagos State standard 60ft × 120ft (~648 m²); a half-plot
- * is the colloquial "small plot" sometimes sold in the south-west.
+ * Nigerian land-area presets. The displayed scan circle radius is derived
+ * directly from the parcel area: r = √(area / π) so the circle on the map
+ * accurately reflects the size of the land the buyer is scanning. (The
+ * backend still pulls in surrounding flood-zone / dam / climate context
+ * regardless of the visible disc.)
  */
-const RADIUS_PRESETS: Array<{ key: string; label: string; sub: string; km: number }> = [
-  { key: 'half-plot', label: 'Half plot',  sub: '~324 m²',     km: 0.020 },
-  { key: 'plot',      label: '1 plot',     sub: '~648 m² (60×120 ft)', km: 0.030 },
-  { key: '2-plots',   label: '2 plots',    sub: '~1,296 m²',   km: 0.040 },
-  { key: 'half-acre', label: 'Half acre',  sub: '~2,023 m²',   km: 0.060 },
-  { key: 'acre',      label: '1 acre',     sub: '~4,047 m² (≈6 plots)', km: 0.080 },
-  { key: 'hectare',   label: '1 hectare',  sub: '10,000 m² (≈15 plots)', km: 0.130 },
-  { key: '5-hectare', label: '5 hectares', sub: '50,000 m²',   km: 0.300 },
-  { key: 'estate',    label: 'Small estate', sub: '~12 hectares', km: 0.500 },
-  { key: 'district',  label: 'District-level', sub: 'Up to 3 km', km: 1.000 },
+const _r = (areaSqm: number) => Math.sqrt(areaSqm / Math.PI) / 1000; // km
+const RADIUS_PRESETS: Array<{ key: string; label: string; sub: string; areaSqm: number; km: number }> = [
+  { key: 'half-plot', label: 'Half plot',     sub: '~324 m²',           areaSqm:    324, km: _r(324)    },
+  { key: 'plot',      label: '1 plot',        sub: '648 m² · 60×120 ft', areaSqm:    648, km: _r(648)    },
+  { key: '2-plots',   label: '2 plots',       sub: '1,296 m²',          areaSqm:   1296, km: _r(1296)   },
+  { key: 'half-acre', label: 'Half acre',     sub: '2,023 m²',          areaSqm:   2023, km: _r(2023)   },
+  { key: 'acre',      label: '1 acre',        sub: '4,047 m² · ≈6 plots', areaSqm:   4047, km: _r(4047)   },
+  { key: 'hectare',   label: '1 hectare',     sub: '10,000 m² · ≈15 plots', areaSqm:  10000, km: _r(10000)  },
+  { key: '5-hectare', label: '5 hectares',    sub: '50,000 m²',         areaSqm:  50000, km: _r(50000)  },
+  { key: 'estate',    label: 'Small estate',  sub: '12 hectares',       areaSqm: 120000, km: _r(120000) },
+  { key: 'district',  label: 'District-scale', sub: '~50 hectares',      areaSqm: 500000, km: _r(500000) },
 ];
+
+function formatArea(sqm: number): string {
+  if (sqm < 10000) return `${sqm.toLocaleString()} m²`;
+  return `${(sqm / 10000).toFixed(sqm < 100000 ? 2 : 1)} ha`;
+}
 
 const RISK_COLORS: Record<string, string> = {
   low: '#4ade80',
@@ -443,11 +450,14 @@ export function NewScan() {
                 <div className="flex items-baseline justify-between mb-2">
                   <h3 className="text-sm font-semibold text-gray-900">Plot size</h3>
                   <span className="text-[11px] text-gray-500">
-                    Scan radius: {(radiusKm * 1000).toFixed(0)} m
+                    Plot area: <span className="font-semibold text-landrify-green">
+                      {formatArea(RADIUS_PRESETS.find(p => p.key === radiusKey)?.areaSqm ?? 0)}
+                    </span>
+                    {' '}· radius {(radiusKm * 1000).toFixed(1)} m
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 mb-3">
-                  Pick the closest standard Nigerian land-area unit. We use this to draw the scan circle around your location.
+                  Pick the closest standard Nigerian land-area unit — the green circle on the map shows the actual size.
                 </p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {RADIUS_PRESETS.map((p) => {

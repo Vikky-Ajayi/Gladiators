@@ -68,7 +68,44 @@ The `NewScan` page (`landrify_frontend/src/pages/NewScan.tsx`) offers five input
 methods (address search, GPS, map pin, quick picks, manual coordinates) with a
 live Mapbox satellite preview and a circular overlay sized by Nigerian land
 units (half-plot, plot, acre, hectare, etc.). The selected unit is converted
-into an equivalent disc radius before being sent to the backend.
+into an equivalent disc radius via `r = √(area / π)` so the visible green
+circle on the map honestly reflects the actual parcel size. Mobile preview is
+square (`aspect-square`) and switches to 16:10 on `sm:` breakpoints.
+
+Scan latitude/longitude accept up to 8 decimal places (≈1 mm precision) via
+`FloatField` + server-side rounding — DB columns remain `Decimal(11,8)`.
+
+## Weather & climate pipeline
+
+Every scan also pulls and stores three weather/climate panels (no API key
+required — Open-Meteo is free public data):
+
+- `weather_current` — current conditions + 7-day forecast (`/v1/forecast`).
+- `weather_historical` — 1995-2024 ERA5 daily reanalysis aggregated into
+  first-decade vs last-decade temperature / rainfall comparisons
+  (`/v1/archive`).
+- `weather_projection` — CMIP6 7-model ensemble at 2030 and 2050 horizons
+  via the `/v1/climate` endpoint (which caps end dates at 2050). One
+  combined call avoids per-second rate limits.
+- `weather_summary` — generated plain-English paragraph injected into the
+  Groq AI report prompt and the `Weather & Climate` UI panel on
+  `ScanResult`.
+
+## Seed data
+
+`python manage.py seed_data` seeds **185 flood-risk zones**, **85 dams** and
+**49 acquisition zones**, sourced from NIHSA AFO 2024 (33 high-risk states +
+FCT), NEMA situation reports, the Federal Ministry of Water Resources
+National Dam Database (12 RBDAs), NEWMAP project sites and state
+gazettes. Loaded from three modules: `seed_data.py`, `_seed_extra.py`
+and `_seed_massive.py`.
+
+## Vercel deploy
+
+`landrify_frontend/vercel.json` provides SPA rewrites that route all
+non-asset paths to `/index.html`, fixing 404s on direct route loads
+(`/scan/result/<id>`, `/dashboard`, etc.). The frontend talks to the
+backend via `VITE_API_BASE_URL`, configured in Vercel project settings.
 
 ## Setup Commands
 

@@ -15,10 +15,12 @@ class LandScanListSerializer(serializers.ModelSerializer):
 
 
 class LandScanCreateSerializer(serializers.Serializer):
-    latitude   = serializers.DecimalField(max_digits=10, decimal_places=8)
-    longitude  = serializers.DecimalField(max_digits=11, decimal_places=8)
-    radius_km  = serializers.DecimalField(max_digits=5, decimal_places=2, default=0.5)
-    accuracy   = serializers.DecimalField(max_digits=8, decimal_places=2, required=False)
+    # Use FloatField (not DecimalField) — JS GPS values can carry 13+ fractional
+    # digits and DecimalField max_digits would reject them. We round in the view.
+    latitude   = serializers.FloatField()
+    longitude  = serializers.FloatField()
+    radius_km  = serializers.FloatField(default=0.5)
+    accuracy   = serializers.FloatField(required=False)
     scan_type  = serializers.ChoiceField(choices=['basic', 'premium'], default='basic')
     address_hint = serializers.CharField(max_length=500, required=False, allow_blank=True)
 
@@ -27,14 +29,22 @@ class LandScanCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 'Latitude must be within Nigeria (4.0 to 14.0).'
             )
-        return value
+        return round(float(value), 8)
 
     def validate_longitude(self, value):
         if not (2.5 <= float(value) <= 15.0):
             raise serializers.ValidationError(
                 'Longitude must be within Nigeria (2.5 to 15.0).'
             )
-        return value
+        return round(float(value), 8)
+
+    def validate_radius_km(self, value):
+        v = float(value)
+        if v <= 0:
+            raise serializers.ValidationError('Radius must be greater than zero.')
+        if v > 50:
+            raise serializers.ValidationError('Radius capped at 50 km per scan.')
+        return round(v, 4)
 
 
 class LandScanDetailSerializer(serializers.ModelSerializer):
@@ -53,6 +63,11 @@ class LandScanDetailSerializer(serializers.ModelSerializer):
             'environmental_risks',
             'elevation_meters',
             'satellite_image_url',
+            # Open-Meteo weather + climate projections
+            'weather_current',
+            'weather_historical',
+            'weather_projection',
+            'weather_summary',
             # Core product — AI time-based report
             'ai_report',
             'ai_report_model',

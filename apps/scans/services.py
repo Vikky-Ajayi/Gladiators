@@ -431,6 +431,17 @@ def run_land_scan(scan, full_report: bool = False) -> dict:
     erosion = check_erosion_risk(lat, lng, scan.state)
     scan.erosion_risk_level = erosion.get('risk_level', 'unknown')
 
+    # 6a. Weather + climate (Open-Meteo, no key required)
+    try:
+        scan.weather_current    = get_current_weather(lat, lng)
+        scan.weather_historical = get_historical_weather(lat, lng)
+        scan.weather_projection = get_climate_projection(lat, lng)
+        scan.weather_summary    = summarise_weather(
+            scan.weather_current, scan.weather_historical, scan.weather_projection,
+        )
+    except Exception as e:
+        logger.warning(f"Weather lookup failed (non-fatal): {e}")
+
     # 6. Dam proximity
     dam = check_dam_proximity(lat, lng)
     scan.nearest_dam_name = dam.get('nearest_dam', '')
@@ -501,6 +512,10 @@ def run_land_scan(scan, full_report: bool = False) -> dict:
         'risk_score': scan.risk_score,
         'risk_level': scan.risk_level,
         'accuracy_meters': float(scan.accuracy_meters) if scan.accuracy_meters else None,
+        'weather_current':    scan.weather_current,
+        'weather_historical': scan.weather_historical,
+        'weather_projection': scan.weather_projection,
+        'weather_summary':    scan.weather_summary,
     }
 
     ai_result = generate_ai_report(scan_data)
@@ -524,11 +539,61 @@ def run_land_scan(scan, full_report: bool = False) -> dict:
 
 # ─── Forward Geocoding (address → coordinates) ────────────────────────────────
 
-def forward_geocode(query: str, limit: int = 6) -> list[dict]:
+def _mapbox_forward_geocode(query: str, limit: int = 6) -> list[dict]:
     """
-    Forward-geocode an address using Nominatim, restricted to Nigeria.
-    Returns up to `limit` matches: [{label, latitude, longitude, type, state, lga}]
+    Mapbox Geocoding API — much better Nigerian street/landmark coverage than
+    Nominatim. Falls back to Nominatim when no token is available or call fails.
     """
+    token = getattr(settings, 'MAPBOX_TOKEN', '') or ''
+    if not token:
+        return []
+    try:
+        # Bias the search to Nigeria's bounding box for relevance.
+        response = requests.get(
+            f"https://api.mapbox.com/geocoding/v5/mapbox.places/{requests.utils.quote(query)}.json",
+            params={
+                'access_token': token,
+                'country': 'ng',
+                'limit': max(1, min(limit, 10)),
+                'autocomplete': 'true',
+                'language': 'en',
+                # Nigeria bbox: minLng,minLat,maxLng,maxLat
+                'bbox': '2.5,4.0,15.0,14.0',
+                'types': 'address,poi,neighborhood,locality,place,district,region',
+            },
+            timeout=10,
+        )
+        if response.status_code != 200:
+            logger.warning(f"Mapbox geocoder returned {response.status_code}")
+            return []
+        out = []
+        for feat in response.json().get('features', []):
+            try:
+                lng, lat = feat['center'][0], feat['center'][1]
+            except (KeyError, IndexError, TypeError):
+                continue
+            if not (4.0 <= lat <= 14.0 and 2.5 <= lng <= 15.0):
+                continue
+            ctx = {c.get('id', '').split('.')[0]: c.get('text', '')
+                   for c in feat.get('context', [])}
+            state = (ctx.get('region') or '').replace(' State', '').strip()
+            lga = ctx.get('district') or ctx.get('place') or ctx.get('locality') or ''
+            out.append({
+                'label': feat.get('place_name', feat.get('text', f"{lat}, {lng}")),
+                'latitude': round(lat, 8),
+                'longitude': round(lng, 8),
+                'type': (feat.get('place_type') or ['address'])[0],
+                'state': state,
+                'lga': lga,
+                'place_id': feat.get('id', ''),
+            })
+        return out
+    except Exception as e:
+        logger.error(f"Mapbox forward geocode error: {e}")
+        return []
+
+
+def _nominatim_forward_geocode(query: str, limit: int = 6) -> list[dict]:
     try:
         time.sleep(0.5)
         response = requests.get(
@@ -558,14 +623,263 @@ def forward_geocode(query: str, limit: int = 6) -> list[dict]:
             lga = addr.get('county') or addr.get('city') or addr.get('town') or addr.get('village') or addr.get('city_district') or ''
             out.append({
                 'label': item.get('display_name', f"{lat}, {lng}"),
-                'latitude': lat,
-                'longitude': lng,
+                'latitude': round(lat, 8),
+                'longitude': round(lng, 8),
                 'type': item.get('type', ''),
                 'state': state,
                 'lga': lga,
-                'place_id': item.get('place_id'),
+                'place_id': str(item.get('place_id', '')),
             })
         return out
     except Exception as e:
         logger.error(f"Nominatim forward geocode error: {e}")
         return []
+
+
+def forward_geocode(query: str, limit: int = 6) -> list[dict]:
+    """
+    Forward-geocode (Nigeria-bounded) using Mapbox first, falling back to
+    Nominatim. Mapbox has dramatically better street + landmark coverage in
+    Nigeria, especially for new estates, roads and Lekki/VI/Abuja districts.
+    """
+    results = _mapbox_forward_geocode(query, limit)
+    if results:
+        return results
+    return _nominatim_forward_geocode(query, limit)
+
+
+# ─── Open-Meteo: Current / Historical / CMIP6 Climate Projections ────────────
+# Open-Meteo is 100% free, no key required. Three endpoints:
+#   - Forecast API:    real-time current weather + 7-day forecast
+#   - Archive API:     ERA5 reanalysis 1940→present (we sample 30-year baseline)
+#   - Climate API:     CMIP6 multi-model downscaled projections to 2050/2100
+# All values cached on the LandScan record and fed into the AI report.
+
+OPEN_METEO_FORECAST = 'https://api.open-meteo.com/v1/forecast'
+OPEN_METEO_ARCHIVE  = 'https://archive-api.open-meteo.com/v1/era5'
+OPEN_METEO_CLIMATE  = 'https://climate-api.open-meteo.com/v1/climate'
+
+
+def get_current_weather(lat: float, lng: float) -> dict | None:
+    """Live snapshot + 7-day outlook from Open-Meteo (no key required)."""
+    try:
+        r = requests.get(OPEN_METEO_FORECAST, params={
+            'latitude': lat,
+            'longitude': lng,
+            'current': 'temperature_2m,relative_humidity_2m,wind_speed_10m,'
+                       'weather_code,precipitation,apparent_temperature',
+            'daily': 'temperature_2m_max,temperature_2m_min,precipitation_sum,'
+                     'wind_speed_10m_max',
+            'timezone': 'Africa/Lagos',
+            'forecast_days': 7,
+        }, timeout=10)
+        if r.status_code != 200:
+            logger.warning(f"Open-Meteo forecast returned {r.status_code}")
+            return None
+        d = r.json()
+        cur = d.get('current') or {}
+        daily = d.get('daily') or {}
+        return {
+            'observed_at': cur.get('time'),
+            'temperature_c': cur.get('temperature_2m'),
+            'apparent_c': cur.get('apparent_temperature'),
+            'humidity_pct': cur.get('relative_humidity_2m'),
+            'wind_kph': cur.get('wind_speed_10m'),
+            'precipitation_mm': cur.get('precipitation'),
+            'weather_code': cur.get('weather_code'),
+            'forecast_7d': {
+                'dates': daily.get('time') or [],
+                'temp_max_c': daily.get('temperature_2m_max') or [],
+                'temp_min_c': daily.get('temperature_2m_min') or [],
+                'rainfall_mm': daily.get('precipitation_sum') or [],
+                'wind_max_kph': daily.get('wind_speed_10m_max') or [],
+            },
+            'source': 'Open-Meteo Forecast (ECMWF + national models)',
+        }
+    except Exception as e:
+        logger.error(f"Open-Meteo current weather error: {e}")
+        return None
+
+
+def get_historical_weather(lat: float, lng: float) -> dict | None:
+    """
+    30-year ERA5 climatology summary (1995-01-01 → 2024-12-31) for the point.
+    Returns annual aggregates the AI uses for trend reasoning. We bucket the
+    daily archive into yearly mean/extremes server-side.
+    """
+    try:
+        r = requests.get(OPEN_METEO_ARCHIVE, params={
+            'latitude': lat,
+            'longitude': lng,
+            'start_date': '1995-01-01',
+            'end_date': '2024-12-31',
+            'daily': 'temperature_2m_mean,temperature_2m_max,temperature_2m_min,'
+                     'precipitation_sum',
+            'timezone': 'Africa/Lagos',
+        }, timeout=30)
+        if r.status_code != 200:
+            logger.warning(f"Open-Meteo archive returned {r.status_code}")
+            return None
+        d = r.json().get('daily') or {}
+        dates = d.get('time') or []
+        means = d.get('temperature_2m_mean') or []
+        maxes = d.get('temperature_2m_max') or []
+        mins  = d.get('temperature_2m_min') or []
+        rain  = d.get('precipitation_sum') or []
+        if not dates:
+            return None
+
+        # Aggregate by year.
+        per_year: dict[int, dict] = {}
+        for i, ds in enumerate(dates):
+            try:
+                y = int(ds[:4])
+            except (ValueError, TypeError):
+                continue
+            b = per_year.setdefault(y, {'tmean': [], 'tmax': [], 'tmin': [], 'rain': []})
+            if i < len(means) and means[i] is not None: b['tmean'].append(means[i])
+            if i < len(maxes) and maxes[i] is not None: b['tmax'].append(maxes[i])
+            if i < len(mins)  and mins[i]  is not None: b['tmin'].append(mins[i])
+            if i < len(rain)  and rain[i]  is not None: b['rain'].append(rain[i])
+
+        years_sorted = sorted(per_year.keys())
+        annual = []
+        for y in years_sorted:
+            b = per_year[y]
+            annual.append({
+                'year': y,
+                'temp_mean_c': round(sum(b['tmean']) / len(b['tmean']), 2) if b['tmean'] else None,
+                'temp_max_c':  round(max(b['tmax']), 2) if b['tmax'] else None,
+                'temp_min_c':  round(min(b['tmin']), 2) if b['tmin'] else None,
+                'rainfall_mm': round(sum(b['rain']), 1) if b['rain'] else None,
+            })
+
+        # Compute first-decade vs last-decade deltas (climate trend signal).
+        def _avg(lst, key):
+            vs = [x[key] for x in lst if x.get(key) is not None]
+            return round(sum(vs) / len(vs), 2) if vs else None
+
+        first10 = [a for a in annual if a['year'] <= years_sorted[0] + 9] if annual else []
+        last10  = [a for a in annual if a['year'] >= years_sorted[-1] - 9] if annual else []
+
+        return {
+            'period': f"{years_sorted[0]}-{years_sorted[-1]}",
+            'baseline_temp_c':  _avg(first10, 'temp_mean_c'),
+            'recent_temp_c':    _avg(last10,  'temp_mean_c'),
+            'baseline_rain_mm': _avg(first10, 'rainfall_mm'),
+            'recent_rain_mm':   _avg(last10,  'rainfall_mm'),
+            'annual': annual,
+            'source': 'ECMWF ERA5 Reanalysis via Open-Meteo Archive API',
+        }
+    except Exception as e:
+        logger.error(f"Open-Meteo historical weather error: {e}")
+        return None
+
+
+def get_climate_projection(lat: float, lng: float) -> dict | None:
+    """
+    CMIP6 multi-model climate projection summary at 2030 and 2050.
+    We request a 7-model ensemble at the point and aggregate annual means
+    per horizon for the AI prompt. (Open-Meteo's high-resolution CMIP6
+    endpoint rejects end dates beyond 2050.)
+    """
+    # Open-Meteo's CMIP6 endpoint caps end dates at 2050 — request the
+    # full 2026-2050 range in ONE call and bucket years client-side. This
+    # avoids the per-second rate limit (HTTP 429) we hit with multiple
+    # back-to-back calls.
+    horizons_def = {
+        '2030': (2026, 2035),
+        '2050': (2046, 2050),
+    }
+    models = ('CMCC_CM2_VHR4,EC_Earth3P_HR,FGOALS_f3_H,'
+              'HiRAM_SIT_HR,MPI_ESM1_2_XR,MRI_AGCM3_2_S,NICAM16_8S')
+
+    out: dict = {'horizons': {label: {'temp_mean_c': None, 'annual_rain_mm': None}
+                              for label in horizons_def},
+                 'source': 'CMIP6 7-model ensemble via Open-Meteo Climate API'}
+    try:
+        r = requests.get(OPEN_METEO_CLIMATE, params={
+            'latitude': lat,
+            'longitude': lng,
+            'start_date': '2026-01-01',
+            'end_date':   '2050-12-31',
+            'models': models,
+            'daily': 'temperature_2m_mean,precipitation_sum',
+            'timezone': 'Africa/Lagos',
+        }, timeout=60)
+        if r.status_code != 200:
+            logger.warning(f"Open-Meteo climate returned {r.status_code}: {r.text[:200]}")
+            return out
+        data = r.json()
+        if data.get('error'):
+            logger.warning(f"Open-Meteo climate error: {data.get('reason')}")
+            return out
+        d = data.get('daily') or {}
+        dates = d.get('time') or []
+        temp_keys = [k for k in d if k.startswith('temperature_2m_mean')]
+        rain_keys = [k for k in d if k.startswith('precipitation_sum')]
+        if not dates or not temp_keys:
+            return out
+
+        buckets: dict[str, dict[str, list]] = {label: {'temp': [], 'rain': []} for label in horizons_def}
+        for i, ds in enumerate(dates):
+            try:
+                year = int(str(ds)[:4])
+            except (ValueError, TypeError):
+                continue
+            t_vals = [d[k][i] for k in temp_keys if i < len(d[k]) and d[k][i] is not None]
+            p_vals = [d[k][i] for k in rain_keys if i < len(d[k]) and d[k][i] is not None]
+            t_mean = sum(t_vals) / len(t_vals) if t_vals else None
+            p_mean = sum(p_vals) / len(p_vals) if p_vals else None
+            for label, (lo, hi) in horizons_def.items():
+                if lo <= year <= hi:
+                    if t_mean is not None: buckets[label]['temp'].append(t_mean)
+                    if p_mean is not None: buckets[label]['rain'].append(p_mean)
+
+        for label, (lo, hi) in horizons_def.items():
+            t = buckets[label]['temp']
+            p = buckets[label]['rain']
+            n_years = max(1, hi - lo + 1)
+            out['horizons'][label] = {
+                'temp_mean_c': round(sum(t) / len(t), 2) if t else None,
+                'annual_rain_mm': round(sum(p) / n_years, 1) if p else None,
+            }
+        return out
+    except Exception as e:
+        logger.error(f"Open-Meteo climate projection error: {e}")
+        return out
+
+
+def summarise_weather(current: dict | None, historical: dict | None,
+                      projection: dict | None) -> str:
+    """One-paragraph plain-English summary the AI grounds its prompt on."""
+    parts = []
+    if current and current.get('temperature_c') is not None:
+        parts.append(
+            f"Now: {current['temperature_c']}°C, "
+            f"humidity {current.get('humidity_pct', '?')}%, "
+            f"wind {current.get('wind_kph', '?')} km/h."
+        )
+    if historical and historical.get('baseline_temp_c') and historical.get('recent_temp_c'):
+        delta_t = round(historical['recent_temp_c'] - historical['baseline_temp_c'], 2)
+        parts.append(
+            f"30-year ERA5 trend: temperature shifted by "
+            f"{'+' if delta_t >= 0 else ''}{delta_t}°C "
+            f"({historical['period']})."
+        )
+        if historical.get('baseline_rain_mm') and historical.get('recent_rain_mm'):
+            delta_r = round(
+                ((historical['recent_rain_mm'] - historical['baseline_rain_mm'])
+                 / max(1, historical['baseline_rain_mm'])) * 100, 1
+            )
+            parts.append(
+                f"Annual rainfall {'+' if delta_r >= 0 else ''}{delta_r}% "
+                f"vs the 1990s baseline."
+            )
+    if projection and projection.get('horizons', {}).get('2050', {}).get('temp_mean_c'):
+        h2050 = projection['horizons']['2050']
+        parts.append(
+            f"CMIP6 2050 outlook: ~{h2050['temp_mean_c']}°C mean, "
+            f"~{h2050.get('annual_rain_mm', '?')} mm/yr rainfall."
+        )
+    return ' '.join(parts)

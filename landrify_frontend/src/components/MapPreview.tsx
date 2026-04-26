@@ -105,20 +105,33 @@ export function MapPreview({
     else map.once('load', update);
   }, [latitude, longitude, radiusKm]);
 
+  // Mobile-first sizing: square on phones (much bigger preview the user asked
+  // for), 16/10 on tablets and up. We expose this on every render path.
+  const aspectClass = 'aspect-square sm:aspect-[16/10]';
+
   if (config && !config.mapbox_token) {
+    // No token → show static satellite tile via the backend if available.
+    const fallbackLat = latitude ?? NIGERIA_CENTER[1];
+    const fallbackLng = longitude ?? NIGERIA_CENTER[0];
+    const staticUrl = `https://tile.openstreetmap.org/6/${Math.floor(((fallbackLng + 180) / 360) * 64)}/${Math.floor((1 - Math.log(Math.tan((fallbackLat * Math.PI) / 180) + 1 / Math.cos((fallbackLat * Math.PI) / 180)) / Math.PI) / 2 * 64)}.png`;
     return (
       <div className={`relative w-full bg-gray-100 rounded-2xl overflow-hidden ${className ?? ''}`}>
-        <div className="aspect-[16/10] flex flex-col items-center justify-center text-center px-6 text-gray-500">
-          <p className="text-sm font-medium">Map preview unavailable</p>
-          <p className="text-xs mt-1 max-w-xs">
-            Set <code className="bg-gray-200 px-1 rounded text-[11px]">MAPBOX_TOKEN</code> in
-            the backend environment to enable live satellite preview.
-          </p>
-          {latitude != null && longitude != null && (
-            <p className="text-[11px] font-mono mt-3">
-              {latitude.toFixed(5)}, {longitude.toFixed(5)} · {radiusKm} km radius
+        <div className={`${aspectClass} flex flex-col items-center justify-center text-center px-6 text-gray-500 bg-cover bg-center relative`}
+          style={{ backgroundImage: `url(${staticUrl})` }}
+        >
+          <div className="absolute inset-0 bg-white/80 backdrop-blur-sm" />
+          <div className="relative">
+            <p className="text-sm font-medium">Map preview unavailable</p>
+            <p className="text-xs mt-1 max-w-xs">
+              Mapbox token not configured. Live satellite preview requires{' '}
+              <code className="bg-gray-200 px-1 rounded text-[11px]">MAPBOX_TOKEN</code> on the backend.
             </p>
-          )}
+            {latitude != null && longitude != null && (
+              <p className="text-[11px] font-mono mt-3">
+                {latitude.toFixed(5)}, {longitude.toFixed(5)} · scan radius {(radiusKm * 1000).toFixed(0)} m
+              </p>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -126,7 +139,12 @@ export function MapPreview({
 
   return (
     <div className={`relative w-full rounded-2xl overflow-hidden ${className ?? ''}`}>
-      <div ref={containerRef} className="aspect-[16/10] w-full bg-gray-200" />
+      <div ref={containerRef} className={`${aspectClass} w-full bg-gray-200`} />
+      {latitude != null && longitude != null && (
+        <div className="absolute bottom-2 left-2 z-10 px-2 py-1 rounded-md bg-black/60 text-white text-[10.5px] font-mono pointer-events-none">
+          scan radius {(radiusKm * 1000).toFixed(0)} m · {(Math.PI * radiusKm * radiusKm * 100).toFixed(2)} ha
+        </div>
+      )}
     </div>
   );
 }
