@@ -76,7 +76,7 @@ export function Dashboard() {
     queryKey: ['dashboard-recent-scans'],
     queryFn: async () => {
       const scans = await getUserScans();
-      return scans.slice(0, 3);
+      return (scans.results ?? []).slice(0, 3);
     },
   });
 

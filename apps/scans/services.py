@@ -1,227 +1,413 @@
-"""
-Landrify Risk Engine
---------------------
-Synchronous risk calculation service.
-Uses 100% free APIs — no credit card required:
-  - Nominatim (OpenStreetMap) for geocoding
-  - Open-Elevation API for elevation data
-  - Mapbox Static Maps for satellite imagery (free token, no card)
-"""
-import math
+"""Landrify scan services and risk-engine helpers."""
+
+from __future__ import annotations
+
 import logging
+import math
 import time
+from collections import defaultdict
+from datetime import date, timedelta
+
 import requests
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+HTTP_SESSION = requests.Session()
+HTTP_SESSION.trust_env = False
 
-# Nominatim requires a descriptive User-Agent
+NIGERIA_LATITUDE_RANGE = (4.0, 14.0)
+NIGERIA_LONGITUDE_RANGE = (2.5, 15.0)
+NOMINATIM_DELAY_SECONDS = 0.3
+DEFAULT_RADIUS_KM = 0.05
+DEFAULT_GEOCODE_LIMIT = 8
+MAX_GEOCODE_LIMIT = 8
+WEATHER_TIMEZONE = 'Africa/Lagos'
+
 NOMINATIM_HEADERS = {
-    'User-Agent': 'Landrify/1.0 (land verification platform Nigeria; contact@landrify.ng)',
+    'User-Agent': 'Landrify/1.0',
     'Accept-Language': 'en',
+}
+NOMINATIM_REVERSE_URL = 'https://nominatim.openstreetmap.org/reverse'
+NOMINATIM_SEARCH_URL = 'https://nominatim.openstreetmap.org/search'
+OPEN_ELEVATION_URL = 'https://api.open-elevation.com/api/v1/lookup'
+OPEN_METEO_ELEVATION_URL = 'https://api.open-meteo.com/v1/elevation'
+OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
+OPEN_METEO_ARCHIVE_URL = 'https://archive-api.open-meteo.com/v1/archive'
+OPEN_METEO_CLIMATE_URL = 'https://climate-api.open-meteo.com/v1/climate'
+MAPBOX_STATIC_URL_TEMPLATE = (
+    'https://api.mapbox.com/styles/v1/mapbox/satellite-v9/static/'
+    '{lng},{lat},{zoom}/600x400@2x?access_token={token}'
+)
+
+ELEVATION_HIGH_RISK_THRESHOLD_METERS = 5
+ELEVATION_MEDIUM_RISK_THRESHOLD_METERS = 15
+EXTREME_RAIN_THRESHOLD_MM = 50
+RAIN_TREND_THRESHOLD_RATIO = 0.10
+FLOOD_TRAJECTORY_THRESHOLD_RATIO = 0.15
+TEMPERATURE_TREND_THRESHOLD_C = 0.5
+
+MAPBOX_ZOOM_BREAKPOINTS = (
+    (0.05, 18),
+    (0.25, 17),
+    (0.50, 16),
+    (1.00, 15),
+    (2.00, 14),
+    (5.00, 13),
+    (10.00, 12),
+)
+
+HIGH_EROSION_STATES = {
+    'Abia',
+    'Akwa Ibom',
+    'Anambra',
+    'Cross River',
+    'Ebonyi',
+    'Enugu',
+    'Imo',
+}
+COASTAL_STATES = {
+    'Bayelsa',
+    'Delta',
+    'Edo',
+    'Lagos',
+    'Ondo',
+    'Rivers',
+}
+
+RISK_WEIGHTS = {
+    'legal': 40,
+    'flood': 30,
+    'erosion': 15,
+    'dam': 15,
+}
+RISK_SCORE_MAP = {
+    'very_low': 0,
+    'low': 20,
+    'medium': 50,
+    'high': 80,
+    'very_high': 100,
+    'critical': 100,
+    'unknown': 30,
+}
+RISK_SEVERITY = {
+    'unknown': 0,
+    'very_low': 1,
+    'low': 2,
+    'medium': 3,
+    'high': 4,
+    'very_high': 5,
+    'critical': 6,
+}
+
+WMO_WEATHER_CODES = {
+    0: 'Clear sky',
+    1: 'Mainly clear',
+    2: 'Partly cloudy',
+    3: 'Overcast',
+    45: 'Fog',
+    48: 'Depositing rime fog',
+    51: 'Light drizzle',
+    53: 'Moderate drizzle',
+    55: 'Dense drizzle',
+    56: 'Light freezing drizzle',
+    57: 'Dense freezing drizzle',
+    61: 'Slight rain',
+    63: 'Moderate rain',
+    65: 'Heavy rain',
+    66: 'Light freezing rain',
+    67: 'Heavy freezing rain',
+    71: 'Slight snow fall',
+    73: 'Moderate snow fall',
+    75: 'Heavy snow fall',
+    77: 'Snow grains',
+    80: 'Slight rain showers',
+    81: 'Moderate rain showers',
+    82: 'Violent rain showers',
+    85: 'Slight snow showers',
+    86: 'Heavy snow showers',
+    95: 'Thunderstorm',
+    96: 'Thunderstorm with slight hail',
+    99: 'Thunderstorm with heavy hail',
 }
 
 
-# ─── Haversine Distance ───────────────────────────────────────────────────────
-
-def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
-    """Calculate distance between two coordinates in kilometers."""
-    R = 6371
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi    = math.radians(lat2 - lat1)
-    dlambda = math.radians(lng2 - lng1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-
-# ─── Geocoding: Nominatim (OpenStreetMap) — FREE, no key, no card ─────────────
-
-def get_location_info(lat: float, lng: float) -> dict:
-    """
-    Reverse geocode coordinates → address, state, LGA.
-    Uses Nominatim (OpenStreetMap) — completely free, no API key needed.
-    Rate limit: 1 request/second (we respect this with a small sleep).
-    """
+def _request_json(
+    method: str,
+    url: str,
+    *,
+    service_name: str,
+    params: dict | None = None,
+    json: dict | None = None,
+    headers: dict | None = None,
+    timeout: int = 10,
+) -> dict | list | None:
+    """Send an HTTP request and return parsed JSON or ``None`` on failure."""
     try:
-        time.sleep(0.5)   # Nominatim fair-use policy
-        response = requests.get(
-            'https://nominatim.openstreetmap.org/reverse',
-            params={
-                'lat':            lat,
-                'lon':            lng,
-                'format':         'json',
-                'addressdetails': 1,
-                'zoom':           14,
-            },
-            headers=NOMINATIM_HEADERS,
-            timeout=10,
+        response = HTTP_SESSION.request(
+            method=method,
+            url=url,
+            params=params,
+            json=json,
+            headers=headers,
+            timeout=timeout,
         )
-
-        if response.status_code != 200:
-            logger.warning(f"Nominatim returned {response.status_code}")
-            return {}
-
-        data = response.json()
-        if 'error' in data:
-            return {}
-
-        address = data.get('address', {})
-
-        # Nominatim uses 'state' and various sub-fields for LGA
-        state = address.get('state', '')
-        lga   = (
-            address.get('county') or
-            address.get('city_district') or
-            address.get('city') or
-            address.get('town') or
-            address.get('village') or
-            ''
-        )
-
-        # Clean up common Nigerian state suffix
-        state = state.replace(' State', '').strip()
-
-        full_address = data.get('display_name', f'{lat}, {lng}')
-
-        return {
-            'address':  full_address,
-            'state':    state,
-            'lga':      lga,
-            'place_id': data.get('osm_id', ''),
-        }
-
-    except Exception as e:
-        logger.error(f"Nominatim geocoding error: {e}")
-        return {}
-
-
-# ─── Elevation: Open-Elevation API — FREE, no key, no card ───────────────────
-
-def get_elevation(lat: float, lng: float) -> float | None:
-    """
-    Get elevation in metres above sea level.
-    Uses Open-Elevation API — completely free, no API key needed.
-    Falls back to a secondary provider if the primary is down.
-    """
-    # Primary: open-elevation.com
-    try:
-        response = requests.post(
-            'https://api.open-elevation.com/api/v1/lookup',
-            json={'locations': [{'latitude': lat, 'longitude': lng}]},
-            timeout=10,
-        )
-        if response.status_code == 200:
-            data = response.json()
-            if data.get('results'):
-                return round(data['results'][0]['elevation'], 2)
-    except Exception as e:
-        logger.warning(f"Open-Elevation primary error: {e}")
-
-    # Fallback: Open-Meteo elevation (also free)
-    try:
-        response = requests.get(
-            'https://api.open-meteo.com/v1/elevation',
-            params={'latitude': lat, 'longitude': lng},
-            timeout=8,
-        )
-        if response.status_code == 200:
-            data = response.json()
-            elevation = data.get('elevation')
-            if elevation and isinstance(elevation, list):
-                return round(elevation[0], 2)
-            if elevation and isinstance(elevation, (int, float)):
-                return round(float(elevation), 2)
-    except Exception as e:
-        logger.warning(f"Open-Meteo elevation fallback error: {e}")
-
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as exc:
+        logger.warning("%s request failed: %s", service_name, exc)
+    except ValueError as exc:
+        logger.warning("%s returned invalid JSON: %s", service_name, exc)
     return None
 
 
-# ─── Satellite Imagery: Mapbox — FREE tier, no card ──────────────────────────
-
-def get_satellite_image_url(lat: float, lng: float, radius_km: float = 1.0) -> str | None:
-    """
-    Build a Mapbox satellite imagery URL.
-
-    Mapbox free tier: 50,000 map loads/month — no credit card required.
-    Sign up at: https://account.mapbox.com/auth/signup/
-    Set MAPBOX_TOKEN in .env
-
-    Falls back gracefully to None if token not set.
-    """
-    token = getattr(settings, 'MAPBOX_TOKEN', '') or ''
-    if not token:
-        logger.info("MAPBOX_TOKEN not set — satellite imagery unavailable.")
+def _safe_float(value) -> float | None:
+    """Convert a value to ``float`` when possible."""
+    if value is None or value == '':
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
         return None
 
-    # Zoom level from radius
-    if   radius_km <= 0.25: zoom = 17
-    elif radius_km <= 0.5:  zoom = 16
-    elif radius_km <= 1:    zoom = 15
-    elif radius_km <= 2:    zoom = 14
-    elif radius_km <= 5:    zoom = 13
-    elif radius_km <= 10:   zoom = 12
-    else:                   zoom = 11
 
-    # Mapbox Static Images API
+def _round_or_none(value: float | None, digits: int = 2) -> float | None:
+    """Round a number when present, otherwise return ``None``."""
+    return round(value, digits) if value is not None else None
+
+
+def _is_within_nigeria(lat: float, lng: float) -> bool:
+    """Return ``True`` when coordinates fall inside Landrify's Nigeria bounds."""
     return (
-        f"https://api.mapbox.com/styles/v1/mapbox/satellite-v9/static"
-        f"/{lng},{lat},{zoom}"
-        f"/600x400@2x"
-        f"?access_token={token}"
+        NIGERIA_LATITUDE_RANGE[0] <= lat <= NIGERIA_LATITUDE_RANGE[1]
+        and NIGERIA_LONGITUDE_RANGE[0] <= lng <= NIGERIA_LONGITUDE_RANGE[1]
     )
 
 
-# ─── Legal Status Check ───────────────────────────────────────────────────────
+def _normalise_state(value: str) -> str:
+    """Normalise state names returned by geocoding services."""
+    return (value or '').replace(' State', '').strip()
 
-def check_legal_status(lat: float, lng: float) -> dict:
-    """
-    Check if land is in a government acquisition area.
-    Queries pre-loaded AcquisitionArea table.
-    """
-    from apps.scans.models import AcquisitionArea
 
-    # Simple bounding box check — fast even without PostGIS
-    acquisitions = AcquisitionArea.objects.filter(
-        min_lat__lte=lat, max_lat__gte=lat,
-        min_lng__lte=lng, max_lng__gte=lng,
+def _extract_lga(address_data: dict) -> str:
+    """Extract the most useful LGA-like field from a Nominatim address payload."""
+    return (
+        address_data.get('county')
+        or address_data.get('city_district')
+        or address_data.get('municipality')
+        or address_data.get('city')
+        or address_data.get('town')
+        or address_data.get('village')
+        or ''
     )
 
-    if acquisitions.exists():
-        area = acquisitions.first()
-        return {
-            'is_government': True,
-            'under_acquisition': True,
-            'authority': area.authority,
-            'acquisition_type': area.acquisition_type,
-            'area_name': area.area_name,
-            'gazette_reference': area.gazette_reference,
-            'note': area.notes or 'This land is within a government acquisition area. Proceed with caution.',
-        }
 
+def _get_mapbox_zoom(radius_km: float) -> int:
+    """Convert a scan radius in kilometres into a Mapbox static-image zoom."""
+    for max_radius, zoom in MAPBOX_ZOOM_BREAKPOINTS:
+        if radius_km <= max_radius:
+            return zoom
+    return 11
+
+
+def _average(values: list[float]) -> float | None:
+    """Return the arithmetic mean for a list, or ``None`` when empty."""
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _years_ago(reference_date: date, years: int) -> date:
+    """Return a date offset by a whole number of years."""
+    try:
+        return reference_date.replace(year=reference_date.year - years)
+    except ValueError:
+        return reference_date.replace(month=2, day=28, year=reference_date.year - years)
+
+
+def _trend_from_halves(values_by_year: list[tuple[int, float]]) -> str:
+    """Classify a rainfall trend by comparing the first half and second half."""
+    if len(values_by_year) < 2:
+        return 'stable'
+
+    midpoint = len(values_by_year) // 2
+    first_half = [value for _, value in values_by_year[:midpoint] if value is not None]
+    second_half = [value for _, value in values_by_year[midpoint:] if value is not None]
+    first_average = _average(first_half)
+    second_average = _average(second_half)
+
+    if first_average in (None, 0) or second_average is None:
+        return 'stable'
+
+    delta_ratio = (second_average - first_average) / first_average
+    if delta_ratio > RAIN_TREND_THRESHOLD_RATIO:
+        return 'increasing'
+    if delta_ratio < -RAIN_TREND_THRESHOLD_RATIO:
+        return 'decreasing'
+    return 'stable'
+
+
+def _temperature_trend_from_halves(values_by_year: list[tuple[int, float]]) -> str:
+    """Classify a temperature trend using a simple first-half/second-half delta."""
+    if len(values_by_year) < 2:
+        return 'stable'
+
+    midpoint = len(values_by_year) // 2
+    first_half = [value for _, value in values_by_year[:midpoint] if value is not None]
+    second_half = [value for _, value in values_by_year[midpoint:] if value is not None]
+    first_average = _average(first_half)
+    second_average = _average(second_half)
+
+    if first_average is None or second_average is None:
+        return 'stable'
+
+    delta = second_average - first_average
+    if delta > TEMPERATURE_TREND_THRESHOLD_C:
+        return 'warming'
+    if delta < -TEMPERATURE_TREND_THRESHOLD_C:
+        return 'cooling'
+    return 'stable'
+
+
+def _weather_description(weather_code: int | None) -> str:
+    """Map a WMO weather code to a human-readable description."""
+    if weather_code is None:
+        return 'Unknown conditions'
+    return WMO_WEATHER_CODES.get(weather_code, 'Unknown conditions')
+
+
+def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Calculate the distance between two coordinates in kilometres."""
+    earth_radius_km = 6371
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lng2 - lng1)
+    a = (
+        math.sin(delta_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    )
+    return 2 * earth_radius_km * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def get_location_info(lat: float, lng: float) -> dict:
+    """Reverse geocode coordinates into address, state, LGA, and place ID."""
+    time.sleep(NOMINATIM_DELAY_SECONDS)
+    data = _request_json(
+        'GET',
+        NOMINATIM_REVERSE_URL,
+        service_name='Nominatim reverse geocode',
+        params={
+            'lat': lat,
+            'lon': lng,
+            'format': 'json',
+            'addressdetails': 1,
+            'zoom': 14,
+        },
+        headers=NOMINATIM_HEADERS,
+        timeout=10,
+    )
+    if not isinstance(data, dict) or data.get('error'):
+        return {}
+
+    address = data.get('address') or {}
     return {
-        'is_government': False,
-        'under_acquisition': False,
-        'note': 'No government acquisition records found for this location. Independent legal verification is still recommended.',
+        'address': data.get('display_name', f'{lat}, {lng}'),
+        'state': _normalise_state(address.get('state', '')),
+        'lga': _extract_lga(address),
+        'place_id': str(data.get('osm_id') or data.get('place_id') or ''),
     }
 
 
-# ─── Flood Risk Check ─────────────────────────────────────────────────────────
+def get_elevation(lat: float, lng: float) -> float | None:
+    """Fetch elevation in metres above sea level with a primary and fallback source."""
+    primary_data = _request_json(
+        'POST',
+        OPEN_ELEVATION_URL,
+        service_name='Open-Elevation',
+        json={'locations': [{'latitude': lat, 'longitude': lng}]},
+        timeout=10,
+    )
+    if isinstance(primary_data, dict) and primary_data.get('results'):
+        elevation = _safe_float(primary_data['results'][0].get('elevation'))
+        if elevation is not None:
+            return round(elevation, 2)
+
+    fallback_data = _request_json(
+        'GET',
+        OPEN_METEO_ELEVATION_URL,
+        service_name='Open-Meteo elevation',
+        params={'latitude': lat, 'longitude': lng},
+        timeout=8,
+    )
+    if not isinstance(fallback_data, dict):
+        return None
+
+    elevation = fallback_data.get('elevation')
+    if isinstance(elevation, list) and elevation:
+        return _round_or_none(_safe_float(elevation[0]))
+    if isinstance(elevation, (int, float)):
+        return round(float(elevation), 2)
+    return None
+
+
+def get_satellite_image_url(lat: float, lng: float, radius_km: float = DEFAULT_RADIUS_KM) -> str | None:
+    """Build a Mapbox Static Images API URL for the requested point."""
+    token = getattr(settings, 'MAPBOX_TOKEN', '') or ''
+    if not token:
+        logger.info("MAPBOX_TOKEN not set; satellite imagery unavailable.")
+        return None
+
+    zoom = _get_mapbox_zoom(radius_km)
+    return MAPBOX_STATIC_URL_TEMPLATE.format(lng=lng, lat=lat, zoom=zoom, token=token)
+
+
+def check_legal_status(lat: float, lng: float) -> dict:
+    """Check whether the point falls inside a seeded government acquisition area."""
+    from apps.scans.models import AcquisitionArea
+
+    acquisitions = AcquisitionArea.objects.filter(
+        min_lat__lte=lat,
+        max_lat__gte=lat,
+        min_lng__lte=lng,
+        max_lng__gte=lng,
+    )
+    area = acquisitions.first()
+    if area is None:
+        return {
+            'is_government': False,
+            'under_acquisition': False,
+            'authority': '',
+            'acquisition_type': '',
+            'area_name': '',
+            'gazette_reference': '',
+            'note': 'No government acquisition records found for this location. Independent legal verification is still recommended.',
+        }
+
+    return {
+        'is_government': True,
+        'under_acquisition': True,
+        'authority': area.authority,
+        'acquisition_type': area.acquisition_type,
+        'area_name': area.area_name,
+        'gazette_reference': area.gazette_reference,
+        'note': area.notes or 'This land falls within a government acquisition area. Proceed only after independent legal clearance.',
+    }
+
 
 def check_flood_risk(lat: float, lng: float, elevation: float | None = None) -> dict:
-    """
-    Check flood risk using pre-loaded flood zone data.
-    Falls back to elevation-based heuristics.
-    """
+    """Assess flood exposure using seeded flood zones with elevation heuristics as fallback."""
     from apps.scans.models import FloodRiskZone
 
-    zones = FloodRiskZone.objects.filter(
-        min_lat__lte=lat, max_lat__gte=lat,
-        min_lng__lte=lng, max_lng__gte=lng,
-    ).order_by('-risk_level')  # highest risk first
-
-    if zones.exists():
-        zone = zones.first()
+    zones = list(
+        FloodRiskZone.objects.filter(
+            min_lat__lte=lat,
+            max_lat__gte=lat,
+            min_lng__lte=lng,
+            max_lng__gte=lng,
+        )
+    )
+    if zones:
+        zone = max(zones, key=lambda item: RISK_SEVERITY.get(item.risk_level, 0))
         return {
             'risk_level': zone.risk_level,
             'zone_name': zone.zone_name,
@@ -233,182 +419,201 @@ def check_flood_risk(lat: float, lng: float, elevation: float | None = None) -> 
             'method': 'zone_data',
         }
 
-    # Elevation-based fallback
     if elevation is not None:
-        if elevation < 5:
-            return {'risk_level': 'high', 'reason': 'Very low elevation (< 5m)', 'method': 'elevation'}
-        elif elevation < 15:
-            return {'risk_level': 'medium', 'reason': 'Low elevation (< 15m)', 'method': 'elevation'}
-        else:
-            return {'risk_level': 'low', 'reason': 'Adequate elevation', 'method': 'elevation'}
-
-    return {'risk_level': 'unknown', 'reason': 'Insufficient data for flood assessment', 'method': 'none'}
-
-
-# ─── Erosion Risk Check ───────────────────────────────────────────────────────
-
-def check_erosion_risk(lat: float, lng: float, state: str = '') -> dict:
-    """
-    Erosion risk based on geographic region.
-    Southeast Nigeria (Anambra, Enugu, Imo, Ebonyi, Abia) = high erosion risk.
-    Coastal areas = coastal erosion risk.
-    """
-    HIGH_EROSION_STATES = {
-        'Anambra', 'Enugu', 'Imo', 'Ebonyi', 'Abia',
-        'Cross River', 'Akwa Ibom'
-    }
-    COASTAL_STATES = {
-        'Lagos', 'Rivers', 'Delta', 'Bayelsa', 'Ondo', 'Edo'
-    }
-
-    state_clean = state.strip()
-
-    if state_clean in HIGH_EROSION_STATES:
+        if elevation < ELEVATION_HIGH_RISK_THRESHOLD_METERS:
+            return {
+                'risk_level': 'high',
+                'zone_name': '',
+                'flood_type': '',
+                'peak_months': '',
+                'last_major_flood_year': None,
+                'data_source': 'Elevation heuristic',
+                'notes': 'Very low elevation suggests elevated flood exposure.',
+                'method': 'elevation',
+            }
+        if elevation < ELEVATION_MEDIUM_RISK_THRESHOLD_METERS:
+            return {
+                'risk_level': 'medium',
+                'zone_name': '',
+                'flood_type': '',
+                'peak_months': '',
+                'last_major_flood_year': None,
+                'data_source': 'Elevation heuristic',
+                'notes': 'Low elevation suggests moderate flood exposure.',
+                'method': 'elevation',
+            }
         return {
-            'risk_level': 'high',
-            'reason': f'{state_clean} is in the high-erosion belt of Southeast Nigeria.',
-            'recommendation': 'Commission a soil survey before construction. Consider erosion-resistant foundation.',
+            'risk_level': 'low',
+            'zone_name': '',
+            'flood_type': '',
+            'peak_months': '',
+            'last_major_flood_year': None,
+            'data_source': 'Elevation heuristic',
+            'notes': 'Elevation does not indicate elevated flood exposure.',
+            'method': 'elevation',
         }
 
-    if state_clean in COASTAL_STATES:
+    return {
+        'risk_level': 'unknown',
+        'zone_name': '',
+        'flood_type': '',
+        'peak_months': '',
+        'last_major_flood_year': None,
+        'data_source': '',
+        'notes': 'Insufficient data for flood assessment.',
+        'method': 'none',
+    }
+
+
+def check_erosion_risk(lat: float, lng: float, state: str = '') -> dict:
+    """Assess erosion risk using regional heuristics for Nigerian states."""
+    del lat, lng
+    state_name = (state or '').strip()
+
+    if state_name in HIGH_EROSION_STATES:
+        return {
+            'risk_level': 'high',
+            'reason': f'{state_name} is in a high-erosion belt.',
+            'recommendation': 'Commission a soil survey and erosion-control design review before development.',
+        }
+
+    if state_name in COASTAL_STATES:
         return {
             'risk_level': 'medium',
-            'reason': f'{state_clean} has coastal and riverine erosion exposure.',
-            'recommendation': 'Check proximity to coastline and waterways. Consider flood and erosion insurance.',
+            'reason': f'{state_name} has coastal or riverine erosion exposure.',
+            'recommendation': 'Assess shoreline, drainage, and embankment conditions before purchase or construction.',
         }
 
     return {
         'risk_level': 'low',
-        'reason': 'No elevated erosion risk identified for this region.',
-        'recommendation': 'Standard site inspection recommended.',
+        'reason': 'No elevated regional erosion risk identified.',
+        'recommendation': 'Standard site inspection remains recommended.',
     }
 
 
-# ─── Dam Proximity Check ──────────────────────────────────────────────────────
-
 def check_dam_proximity(lat: float, lng: float) -> dict:
-    """Find nearest dam and assess risk based on distance."""
+    """Find the nearest seeded dam and classify proximity risk by distance."""
     from apps.scans.models import Dam
 
     dams = Dam.objects.all()
     if not dams.exists():
-        return {'risk_level': 'unknown', 'reason': 'Dam data not available'}
+        return {
+            'nearest_dam': '',
+            'distance_km': None,
+            'risk_level': 'unknown',
+            'river_basin': '',
+            'capacity_mcm': None,
+            'height_m': None,
+            'year_completed': None,
+            'purpose': '',
+            'downstream_states': '',
+            'notes': 'Dam data unavailable.',
+        }
 
-    nearest = None
+    nearest_dam = None
     min_distance = float('inf')
-
     for dam in dams:
-        dist = haversine_distance(lat, lng, float(dam.latitude), float(dam.longitude))
-        if dist < min_distance:
-            min_distance = dist
-            nearest = dam
+        distance_km = haversine_distance(lat, lng, float(dam.latitude), float(dam.longitude))
+        if distance_km < min_distance:
+            min_distance = distance_km
+            nearest_dam = dam
 
-    distance_km = round(min_distance, 2)
-
-    if distance_km < 5:
+    if min_distance < 5:
         risk_level = 'critical'
-    elif distance_km < 20:
+    elif min_distance < 20:
         risk_level = 'high'
-    elif distance_km < 50:
+    elif min_distance < 50:
         risk_level = 'medium'
     else:
         risk_level = 'low'
 
     return {
-        'nearest_dam': nearest.name if nearest else None,
-        'distance_km': distance_km,
+        'nearest_dam': nearest_dam.name if nearest_dam else '',
+        'distance_km': round(min_distance, 2) if nearest_dam else None,
         'risk_level': risk_level,
-        'river_basin': nearest.river_basin if nearest else '',
-        'capacity_mcm': nearest.capacity_mcm if nearest else None,
-        'height_m': nearest.height_m if nearest else None,
-        'year_completed': nearest.year_completed if nearest else None,
-        'purpose': nearest.purpose if nearest else '',
-        'downstream_states': nearest.downstream_states if nearest else '',
-        'notes': nearest.notes if nearest else '',
+        'river_basin': nearest_dam.river_basin if nearest_dam else '',
+        'capacity_mcm': nearest_dam.capacity_mcm if nearest_dam else None,
+        'height_m': nearest_dam.height_m if nearest_dam else None,
+        'year_completed': nearest_dam.year_completed if nearest_dam else None,
+        'purpose': nearest_dam.purpose if nearest_dam else '',
+        'downstream_states': nearest_dam.downstream_states if nearest_dam else '',
+        'notes': nearest_dam.notes if nearest_dam else '',
     }
 
 
-# ─── Risk Score Calculator ────────────────────────────────────────────────────
-
-RISK_WEIGHTS = {
-    'legal': 40,       # Government acquisition = highest risk (40%)
-    'flood': 30,       # Flood risk (30%)
-    'erosion': 15,     # Erosion risk (15%)
-    'dam': 15,         # Dam proximity (15%)
-}
-
-RISK_SCORE_MAP = {
-    'very_low': 0,
-    'low': 20,
-    'medium': 50,
-    'high': 80,
-    'very_high': 100,
-    'critical': 100,
-    'unknown': 30,  # Default to medium-low when unknown
-}
-
-
 def calculate_risk_score(legal: dict, flood: dict, erosion: dict, dam: dict) -> int:
-    """
-    Calculate overall risk score (0-100).
-    Higher score = higher risk.
-    """
-    # Legal is binary — if government land, add full weight
+    """Calculate the overall Landrify risk score on a 0-100 scale."""
     legal_score = 100 if legal.get('is_government') else 0
-
     flood_score = RISK_SCORE_MAP.get(flood.get('risk_level', 'unknown'), 30)
     erosion_score = RISK_SCORE_MAP.get(erosion.get('risk_level', 'unknown'), 30)
     dam_score = RISK_SCORE_MAP.get(dam.get('risk_level', 'unknown'), 10)
 
-    score = (
-        legal_score * RISK_WEIGHTS['legal'] / 100 +
-        flood_score * RISK_WEIGHTS['flood'] / 100 +
-        erosion_score * RISK_WEIGHTS['erosion'] / 100 +
-        dam_score * RISK_WEIGHTS['dam'] / 100
+    weighted_score = (
+        legal_score * RISK_WEIGHTS['legal'] / 100
+        + flood_score * RISK_WEIGHTS['flood'] / 100
+        + erosion_score * RISK_WEIGHTS['erosion'] / 100
+        + dam_score * RISK_WEIGHTS['dam'] / 100
     )
-
-    return min(100, max(0, round(score)))
+    return min(100, max(0, round(weighted_score)))
 
 
 def get_risk_level(score: int) -> str:
+    """Map a numeric risk score to the public risk-level band."""
     if score < 25:
         return 'low'
-    elif score < 50:
+    if score < 50:
         return 'medium'
-    elif score < 75:
+    if score < 75:
         return 'high'
-    else:
-        return 'critical'
+    return 'critical'
 
-
-# ─── Main Entry Point ─────────────────────────────────────────────────────────
 
 def run_land_scan(scan, full_report: bool = False) -> dict:
-    """
-    Run all checks for a LandScan instance and update it in-place.
-    Synchronous — called directly in the view.
+    """Run the full scan pipeline for a ``LandScan`` instance."""
+    from django.utils import timezone
 
-    full_report=True  → Pro users: runs full Groq AI time-projection report
-    full_report=False → Basic users: risk data only, no AI projections
-    """
     lat = float(scan.latitude)
     lng = float(scan.longitude)
-    radius_km = float(scan.radius_km) if scan.radius_km else 1.0
+    radius_km = float(scan.radius_km or DEFAULT_RADIUS_KM)
 
-    # 1. Geocode location
     location_info = get_location_info(lat, lng)
     if location_info:
         scan.address = location_info.get('address', scan.address)
         scan.state = location_info.get('state', scan.state)
         scan.lga = location_info.get('lga', scan.lga)
-        scan.place_id = location_info.get('place_id', '')
+        scan.place_id = location_info.get('place_id', scan.place_id)
+    elif not scan.address:
+        scan.address = scan.address_hint or f'{lat}, {lng}'
 
-    # 2. Get elevation
+    scan.satellite_image_url = get_satellite_image_url(lat, lng, radius_km) or ''
+
     elevation = get_elevation(lat, lng)
     if elevation is not None:
         scan.elevation_meters = elevation
 
-    # 3. Legal status
+    try:
+        weather_current = get_current_weather(lat, lng)
+    except Exception as exc:
+        logger.warning("Weather current fetch failed: %s", exc)
+        weather_current = None
+
+    try:
+        weather_historical = get_historical_weather(lat, lng, years=10)
+    except Exception as exc:
+        logger.warning("Weather historical fetch failed: %s", exc)
+        weather_historical = None
+
+    try:
+        weather_projection = get_climate_projection(lat, lng)
+    except Exception as exc:
+        logger.warning("Weather projection fetch failed: %s", exc)
+        weather_projection = None
+
+    scan.weather_current = weather_current
+    scan.weather_historical = weather_historical
+    scan.weather_projection = weather_projection
+    scan.weather_summary = summarise_weather(weather_current, weather_historical, weather_projection)
+
     legal = check_legal_status(lat, lng)
     scan.is_government_land = legal.get('is_government', False)
     scan.is_under_acquisition = legal.get('under_acquisition', False)
@@ -417,7 +622,6 @@ def run_land_scan(scan, full_report: bool = False) -> dict:
     scan.gazette_reference = legal.get('gazette_reference', '')
     scan.legal_notes = legal.get('note', '')
 
-    # 4. Flood risk
     flood = check_flood_risk(lat, lng, elevation)
     scan.flood_risk_level = flood.get('risk_level', 'unknown')
     scan.flood_zone_name = flood.get('zone_name', '')
@@ -427,22 +631,9 @@ def run_land_scan(scan, full_report: bool = False) -> dict:
     scan.flood_notes = flood.get('notes', '')
     scan.flood_data_source = flood.get('data_source', '')
 
-    # 5. Erosion risk
     erosion = check_erosion_risk(lat, lng, scan.state)
     scan.erosion_risk_level = erosion.get('risk_level', 'unknown')
 
-    # 6a. Weather + climate (Open-Meteo, no key required)
-    try:
-        scan.weather_current    = get_current_weather(lat, lng)
-        scan.weather_historical = get_historical_weather(lat, lng)
-        scan.weather_projection = get_climate_projection(lat, lng)
-        scan.weather_summary    = summarise_weather(
-            scan.weather_current, scan.weather_historical, scan.weather_projection,
-        )
-    except Exception as e:
-        logger.warning(f"Weather lookup failed (non-fatal): {e}")
-
-    # 6. Dam proximity
     dam = check_dam_proximity(lat, lng)
     scan.nearest_dam_name = dam.get('nearest_dam', '')
     scan.nearest_dam_distance_km = dam.get('distance_km')
@@ -455,23 +646,24 @@ def run_land_scan(scan, full_report: bool = False) -> dict:
     scan.dam_downstream_states = dam.get('downstream_states', '')
     scan.dam_notes = dam.get('notes', '')
 
-    # 7. Overall score
     scan.risk_score = calculate_risk_score(legal, flood, erosion, dam)
     scan.risk_level = get_risk_level(scan.risk_score)
     scan.status = 'completed'
     scan.save()
 
-    # 8. Generate AI time-projection report (Pro users only)
-    from django.utils import timezone
-
     if not full_report:
-        # Basic scan — skip Groq, mark complete without AI report
-        scan.report_generated    = True
+        scan.report_generated = True
         scan.report_generated_at = timezone.now()
         scan.save(update_fields=['report_generated', 'report_generated_at'])
         return {
-            'legal': legal, 'flood': flood,
-            'erosion': erosion, 'dam': dam, 'elevation': elevation,
+            'legal': legal,
+            'flood': flood,
+            'erosion': erosion,
+            'dam': dam,
+            'elevation': elevation,
+            'weather_current': weather_current,
+            'weather_historical': weather_historical,
+            'weather_projection': weather_projection,
             'ai_report_status': 'skipped_basic_plan',
         }
 
@@ -481,10 +673,12 @@ def run_land_scan(scan, full_report: bool = False) -> dict:
         'latitude': lat,
         'longitude': lng,
         'radius_km': radius_km,
+        'address_hint': scan.address_hint,
         'address': scan.address,
         'state': scan.state,
         'lga': scan.lga,
         'elevation_meters': scan.elevation_meters,
+        'satellite_image_url': scan.satellite_image_url,
         'is_government_land': scan.is_government_land,
         'is_under_acquisition': scan.is_under_acquisition,
         'acquisition_authority': scan.acquisition_authority,
@@ -512,20 +706,27 @@ def run_land_scan(scan, full_report: bool = False) -> dict:
         'risk_score': scan.risk_score,
         'risk_level': scan.risk_level,
         'accuracy_meters': float(scan.accuracy_meters) if scan.accuracy_meters else None,
-        'weather_current':    scan.weather_current,
-        'weather_historical': scan.weather_historical,
-        'weather_projection': scan.weather_projection,
-        'weather_summary':    scan.weather_summary,
+        'weather_current': weather_current,
+        'weather_historical': weather_historical,
+        'weather_projection': weather_projection,
+        'weather_summary': scan.weather_summary,
     }
 
     ai_result = generate_ai_report(scan_data)
-
     scan.ai_report = ai_result.get('report', '')
     scan.ai_report_model = ai_result.get('model', '')
-    scan.ai_report_tokens = ai_result.get('tokens_used', {}).get('total')
+    scan.ai_report_tokens = (ai_result.get('tokens_used') or {}).get('total')
     scan.report_generated = True
     scan.report_generated_at = timezone.now()
-    scan.save()
+    scan.save(
+        update_fields=[
+            'ai_report',
+            'ai_report_model',
+            'ai_report_tokens',
+            'report_generated',
+            'report_generated_at',
+        ]
+    )
 
     return {
         'legal': legal,
@@ -533,353 +734,325 @@ def run_land_scan(scan, full_report: bool = False) -> dict:
         'erosion': erosion,
         'dam': dam,
         'elevation': elevation,
+        'weather_current': weather_current,
+        'weather_historical': weather_historical,
+        'weather_projection': weather_projection,
         'ai_report_status': ai_result.get('status'),
     }
 
 
-# ─── Forward Geocoding (address → coordinates) ────────────────────────────────
-
-def _mapbox_forward_geocode(query: str, limit: int = 6) -> list[dict]:
-    """
-    Mapbox Geocoding API — much better Nigerian street/landmark coverage than
-    Nominatim. Falls back to Nominatim when no token is available or call fails.
-    """
-    token = getattr(settings, 'MAPBOX_TOKEN', '') or ''
-    if not token:
-        return []
-    try:
-        # Bias the search to Nigeria's bounding box for relevance.
-        response = requests.get(
-            f"https://api.mapbox.com/geocoding/v5/mapbox.places/{requests.utils.quote(query)}.json",
-            params={
-                'access_token': token,
-                'country': 'ng',
-                'limit': max(1, min(limit, 10)),
-                'autocomplete': 'true',
-                'language': 'en',
-                # Nigeria bbox: minLng,minLat,maxLng,maxLat
-                'bbox': '2.5,4.0,15.0,14.0',
-                'types': 'address,poi,neighborhood,locality,place,district,region',
-            },
-            timeout=10,
-        )
-        if response.status_code != 200:
-            logger.warning(f"Mapbox geocoder returned {response.status_code}")
-            return []
-        out = []
-        for feat in response.json().get('features', []):
-            try:
-                lng, lat = feat['center'][0], feat['center'][1]
-            except (KeyError, IndexError, TypeError):
-                continue
-            if not (4.0 <= lat <= 14.0 and 2.5 <= lng <= 15.0):
-                continue
-            ctx = {c.get('id', '').split('.')[0]: c.get('text', '')
-                   for c in feat.get('context', [])}
-            state = (ctx.get('region') or '').replace(' State', '').strip()
-            lga = ctx.get('district') or ctx.get('place') or ctx.get('locality') or ''
-            out.append({
-                'label': feat.get('place_name', feat.get('text', f"{lat}, {lng}")),
-                'latitude': round(lat, 8),
-                'longitude': round(lng, 8),
-                'type': (feat.get('place_type') or ['address'])[0],
-                'state': state,
-                'lga': lga,
-                'place_id': feat.get('id', ''),
-            })
-        return out
-    except Exception as e:
-        logger.error(f"Mapbox forward geocode error: {e}")
+def forward_geocode(query: str, limit: int = DEFAULT_GEOCODE_LIMIT) -> list[dict]:
+    """Forward geocode a Nigerian address using Nominatim autocomplete search."""
+    time.sleep(NOMINATIM_DELAY_SECONDS)
+    capped_limit = max(1, min(int(limit), MAX_GEOCODE_LIMIT))
+    data = _request_json(
+        'GET',
+        NOMINATIM_SEARCH_URL,
+        service_name='Nominatim forward geocode',
+        params={
+            'q': query,
+            'countrycodes': 'ng',
+            'format': 'json',
+            'addressdetails': 1,
+            'limit': capped_limit,
+        },
+        headers=NOMINATIM_HEADERS,
+        timeout=10,
+    )
+    if not isinstance(data, list):
         return []
 
+    results = []
+    for item in data:
+        lat = _safe_float(item.get('lat'))
+        lng = _safe_float(item.get('lon'))
+        if lat is None or lng is None or not _is_within_nigeria(lat, lng):
+            continue
 
-def _nominatim_forward_geocode(query: str, limit: int = 6) -> list[dict]:
-    try:
-        time.sleep(0.5)
-        response = requests.get(
-            'https://nominatim.openstreetmap.org/search',
-            params={
-                'q': query,
-                'format': 'json',
-                'addressdetails': 1,
-                'limit': max(1, min(limit, 10)),
-                'countrycodes': 'ng',
-            },
-            headers=NOMINATIM_HEADERS,
-            timeout=10,
-        )
-        if response.status_code != 200:
-            return []
-        out = []
-        for item in response.json():
-            try:
-                lat = float(item['lat']); lng = float(item['lon'])
-            except (KeyError, TypeError, ValueError):
-                continue
-            if not (4.0 <= lat <= 14.0 and 2.5 <= lng <= 15.0):
-                continue
-            addr = item.get('address', {})
-            state = (addr.get('state') or '').replace(' State', '').strip()
-            lga = addr.get('county') or addr.get('city') or addr.get('town') or addr.get('village') or addr.get('city_district') or ''
-            out.append({
-                'label': item.get('display_name', f"{lat}, {lng}"),
+        address = item.get('address') or {}
+        results.append(
+            {
+                'label': item.get('display_name', f'{lat}, {lng}'),
                 'latitude': round(lat, 8),
                 'longitude': round(lng, 8),
                 'type': item.get('type', ''),
-                'state': state,
-                'lga': lga,
+                'state': _normalise_state(address.get('state', '')),
+                'lga': _extract_lga(address),
                 'place_id': str(item.get('place_id', '')),
-            })
-        return out
-    except Exception as e:
-        logger.error(f"Nominatim forward geocode error: {e}")
-        return []
-
-
-def forward_geocode(query: str, limit: int = 6) -> list[dict]:
-    """
-    Forward-geocode (Nigeria-bounded) using Mapbox first, falling back to
-    Nominatim. Mapbox has dramatically better street + landmark coverage in
-    Nigeria, especially for new estates, roads and Lekki/VI/Abuja districts.
-    """
-    results = _mapbox_forward_geocode(query, limit)
-    if results:
-        return results
-    return _nominatim_forward_geocode(query, limit)
-
-
-# ─── Open-Meteo: Current / Historical / CMIP6 Climate Projections ────────────
-# Open-Meteo is 100% free, no key required. Three endpoints:
-#   - Forecast API:    real-time current weather + 7-day forecast
-#   - Archive API:     ERA5 reanalysis 1940→present (we sample 30-year baseline)
-#   - Climate API:     CMIP6 multi-model downscaled projections to 2050/2100
-# All values cached on the LandScan record and fed into the AI report.
-
-OPEN_METEO_FORECAST = 'https://api.open-meteo.com/v1/forecast'
-OPEN_METEO_ARCHIVE  = 'https://archive-api.open-meteo.com/v1/era5'
-OPEN_METEO_CLIMATE  = 'https://climate-api.open-meteo.com/v1/climate'
+            }
+        )
+    return results
 
 
 def get_current_weather(lat: float, lng: float) -> dict | None:
-    """Live snapshot + 7-day outlook from Open-Meteo (no key required)."""
-    try:
-        r = requests.get(OPEN_METEO_FORECAST, params={
+    """Fetch current weather conditions from Open-Meteo."""
+    data = _request_json(
+        'GET',
+        OPEN_METEO_FORECAST_URL,
+        service_name='Open-Meteo current weather',
+        params={
             'latitude': lat,
             'longitude': lng,
-            'current': 'temperature_2m,relative_humidity_2m,wind_speed_10m,'
-                       'weather_code,precipitation,apparent_temperature',
-            'daily': 'temperature_2m_max,temperature_2m_min,precipitation_sum,'
-                     'wind_speed_10m_max',
-            'timezone': 'Africa/Lagos',
-            'forecast_days': 7,
-        }, timeout=10)
-        if r.status_code != 200:
-            logger.warning(f"Open-Meteo forecast returned {r.status_code}")
-            return None
-        d = r.json()
-        cur = d.get('current') or {}
-        daily = d.get('daily') or {}
-        return {
-            'observed_at': cur.get('time'),
-            'temperature_c': cur.get('temperature_2m'),
-            'apparent_c': cur.get('apparent_temperature'),
-            'humidity_pct': cur.get('relative_humidity_2m'),
-            'wind_kph': cur.get('wind_speed_10m'),
-            'precipitation_mm': cur.get('precipitation'),
-            'weather_code': cur.get('weather_code'),
-            'forecast_7d': {
-                'dates': daily.get('time') or [],
-                'temp_max_c': daily.get('temperature_2m_max') or [],
-                'temp_min_c': daily.get('temperature_2m_min') or [],
-                'rainfall_mm': daily.get('precipitation_sum') or [],
-                'wind_max_kph': daily.get('wind_speed_10m_max') or [],
-            },
-            'source': 'Open-Meteo Forecast (ECMWF + national models)',
-        }
-    except Exception as e:
-        logger.error(f"Open-Meteo current weather error: {e}")
+            'current': 'temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,weather_code',
+            'timezone': WEATHER_TIMEZONE,
+        },
+        timeout=10,
+    )
+    if not isinstance(data, dict):
         return None
 
+    current = data.get('current') or {}
+    weather_code = current.get('weather_code')
+    if weather_code is None:
+        return None
 
-def get_historical_weather(lat: float, lng: float) -> dict | None:
-    """
-    30-year ERA5 climatology summary (1995-01-01 → 2024-12-31) for the point.
-    Returns annual aggregates the AI uses for trend reasoning. We bucket the
-    daily archive into yearly mean/extremes server-side.
-    """
-    try:
-        r = requests.get(OPEN_METEO_ARCHIVE, params={
+    return {
+        'temperature_c': _round_or_none(_safe_float(current.get('temperature_2m'))),
+        'humidity_percent': _round_or_none(_safe_float(current.get('relative_humidity_2m'))),
+        'precipitation_mm': _round_or_none(_safe_float(current.get('precipitation'))),
+        'wind_speed_kmh': _round_or_none(_safe_float(current.get('wind_speed_10m'))),
+        'weather_code': int(weather_code),
+        'description': _weather_description(int(weather_code)),
+    }
+
+
+def get_historical_weather(lat: float, lng: float, years: int = 10) -> dict | None:
+    """Fetch and summarise historical weather for the requested point."""
+    today = date.today()
+    start_date = _years_ago(today, years)
+    end_date = today - timedelta(days=1)
+
+    data = _request_json(
+        'GET',
+        OPEN_METEO_ARCHIVE_URL,
+        service_name='Open-Meteo historical weather',
+        params={
             'latitude': lat,
             'longitude': lng,
-            'start_date': '1995-01-01',
-            'end_date': '2024-12-31',
-            'daily': 'temperature_2m_mean,temperature_2m_max,temperature_2m_min,'
-                     'precipitation_sum',
-            'timezone': 'Africa/Lagos',
-        }, timeout=30)
-        if r.status_code != 200:
-            logger.warning(f"Open-Meteo archive returned {r.status_code}")
-            return None
-        d = r.json().get('daily') or {}
-        dates = d.get('time') or []
-        means = d.get('temperature_2m_mean') or []
-        maxes = d.get('temperature_2m_max') or []
-        mins  = d.get('temperature_2m_min') or []
-        rain  = d.get('precipitation_sum') or []
-        if not dates:
-            return None
-
-        # Aggregate by year.
-        per_year: dict[int, dict] = {}
-        for i, ds in enumerate(dates):
-            try:
-                y = int(ds[:4])
-            except (ValueError, TypeError):
-                continue
-            b = per_year.setdefault(y, {'tmean': [], 'tmax': [], 'tmin': [], 'rain': []})
-            if i < len(means) and means[i] is not None: b['tmean'].append(means[i])
-            if i < len(maxes) and maxes[i] is not None: b['tmax'].append(maxes[i])
-            if i < len(mins)  and mins[i]  is not None: b['tmin'].append(mins[i])
-            if i < len(rain)  and rain[i]  is not None: b['rain'].append(rain[i])
-
-        years_sorted = sorted(per_year.keys())
-        annual = []
-        for y in years_sorted:
-            b = per_year[y]
-            annual.append({
-                'year': y,
-                'temp_mean_c': round(sum(b['tmean']) / len(b['tmean']), 2) if b['tmean'] else None,
-                'temp_max_c':  round(max(b['tmax']), 2) if b['tmax'] else None,
-                'temp_min_c':  round(min(b['tmin']), 2) if b['tmin'] else None,
-                'rainfall_mm': round(sum(b['rain']), 1) if b['rain'] else None,
-            })
-
-        # Compute first-decade vs last-decade deltas (climate trend signal).
-        def _avg(lst, key):
-            vs = [x[key] for x in lst if x.get(key) is not None]
-            return round(sum(vs) / len(vs), 2) if vs else None
-
-        first10 = [a for a in annual if a['year'] <= years_sorted[0] + 9] if annual else []
-        last10  = [a for a in annual if a['year'] >= years_sorted[-1] - 9] if annual else []
-
-        return {
-            'period': f"{years_sorted[0]}-{years_sorted[-1]}",
-            'baseline_temp_c':  _avg(first10, 'temp_mean_c'),
-            'recent_temp_c':    _avg(last10,  'temp_mean_c'),
-            'baseline_rain_mm': _avg(first10, 'rainfall_mm'),
-            'recent_rain_mm':   _avg(last10,  'rainfall_mm'),
-            'annual': annual,
-            'source': 'ECMWF ERA5 Reanalysis via Open-Meteo Archive API',
-        }
-    except Exception as e:
-        logger.error(f"Open-Meteo historical weather error: {e}")
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat(),
+            'daily': 'precipitation_sum,temperature_2m_max,temperature_2m_min,et0_fao_evapotranspiration',
+            'timezone': WEATHER_TIMEZONE,
+        },
+        timeout=30,
+    )
+    if not isinstance(data, dict):
         return None
+
+    daily = data.get('daily') or {}
+    dates = daily.get('time') or []
+    rainfall = daily.get('precipitation_sum') or []
+    max_temps = daily.get('temperature_2m_max') or []
+    min_temps = daily.get('temperature_2m_min') or []
+
+    if not dates:
+        return None
+
+    per_year: dict[int, dict[str, list | float | int]] = defaultdict(
+        lambda: {
+            'rainfall_total': 0.0,
+            'max_temps': [],
+            'min_temps': [],
+            'extreme_rain_days': 0,
+        }
+    )
+
+    for index, date_value in enumerate(dates):
+        try:
+            year = int(str(date_value)[:4])
+        except (TypeError, ValueError):
+            continue
+
+        rain_value = _safe_float(rainfall[index]) if index < len(rainfall) else None
+        max_temp = _safe_float(max_temps[index]) if index < len(max_temps) else None
+        min_temp = _safe_float(min_temps[index]) if index < len(min_temps) else None
+        bucket = per_year[year]
+
+        if rain_value is not None:
+            bucket['rainfall_total'] += rain_value
+            if rain_value > EXTREME_RAIN_THRESHOLD_MM:
+                bucket['extreme_rain_days'] += 1
+        if max_temp is not None:
+            bucket['max_temps'].append(max_temp)
+        if min_temp is not None:
+            bucket['min_temps'].append(min_temp)
+
+    years_sorted = sorted(per_year)
+    if not years_sorted:
+        return None
+
+    rainfall_by_year = [(year, float(per_year[year]['rainfall_total'])) for year in years_sorted]
+    avg_max_temp_by_year = [
+        (year, _average(per_year[year]['max_temps']))  # type: ignore[arg-type]
+        for year in years_sorted
+    ]
+    avg_min_temp_by_year = [
+        (year, _average(per_year[year]['min_temps']))  # type: ignore[arg-type]
+        for year in years_sorted
+    ]
+
+    total_rainfall_period = sum(value for _, value in rainfall_by_year)
+    wettest_year, wettest_rainfall = max(rainfall_by_year, key=lambda item: item[1])
+    driest_year, driest_rainfall = min(rainfall_by_year, key=lambda item: item[1])
+
+    all_yearly_maxes = [value for _, value in avg_max_temp_by_year if value is not None]
+    all_yearly_mins = [value for _, value in avg_min_temp_by_year if value is not None]
+    total_extreme_rain_days = sum(int(per_year[year]['extreme_rain_days']) for year in years_sorted)
+
+    return {
+        'avg_annual_rainfall_mm': round(total_rainfall_period / len(years_sorted), 2),
+        'total_rainfall_period_mm': round(total_rainfall_period, 2),
+        'rainfall_trend': _trend_from_halves(rainfall_by_year),
+        'avg_max_temp_c': _round_or_none(_average(all_yearly_maxes)),
+        'avg_min_temp_c': _round_or_none(_average(all_yearly_mins)),
+        'temp_trend': _temperature_trend_from_halves(
+            [(year, value) for year, value in avg_max_temp_by_year if value is not None]
+        ),
+        'years_analysed': len(years_sorted),
+        'wettest_year': wettest_year,
+        'wettest_year_rainfall_mm': round(wettest_rainfall, 2),
+        'driest_year': driest_year,
+        'driest_year_rainfall_mm': round(driest_rainfall, 2),
+        'extreme_rain_days_per_year': round(total_extreme_rain_days / len(years_sorted), 2),
+    }
 
 
 def get_climate_projection(lat: float, lng: float) -> dict | None:
-    """
-    CMIP6 multi-model climate projection summary at 2030 and 2050.
-    We request a 7-model ensemble at the point and aggregate annual means
-    per horizon for the AI prompt. (Open-Meteo's high-resolution CMIP6
-    endpoint rejects end dates beyond 2050.)
-    """
-    # Open-Meteo's CMIP6 endpoint caps end dates at 2050 — request the
-    # full 2026-2050 range in ONE call and bucket years client-side. This
-    # avoids the per-second rate limit (HTTP 429) we hit with multiple
-    # back-to-back calls.
-    horizons_def = {
-        '2030': (2026, 2035),
-        '2050': (2046, 2050),
-    }
-    models = ('CMCC_CM2_VHR4,EC_Earth3P_HR,FGOALS_f3_H,'
-              'HiRAM_SIT_HR,MPI_ESM1_2_XR,MRI_AGCM3_2_S,NICAM16_8S')
-
-    out: dict = {'horizons': {label: {'temp_mean_c': None, 'annual_rain_mm': None}
-                              for label in horizons_def},
-                 'source': 'CMIP6 7-model ensemble via Open-Meteo Climate API'}
-    try:
-        r = requests.get(OPEN_METEO_CLIMATE, params={
+    """Fetch MRI_AGCM3_2_S climate projections and summarise key milestones."""
+    data = _request_json(
+        'GET',
+        OPEN_METEO_CLIMATE_URL,
+        service_name='Open-Meteo climate projection',
+        params={
             'latitude': lat,
             'longitude': lng,
-            'start_date': '2026-01-01',
-            'end_date':   '2050-12-31',
-            'models': models,
-            'daily': 'temperature_2m_mean,precipitation_sum',
-            'timezone': 'Africa/Lagos',
-        }, timeout=60)
-        if r.status_code != 200:
-            logger.warning(f"Open-Meteo climate returned {r.status_code}: {r.text[:200]}")
-            return out
-        data = r.json()
-        if data.get('error'):
-            logger.warning(f"Open-Meteo climate error: {data.get('reason')}")
-            return out
-        d = data.get('daily') or {}
-        dates = d.get('time') or []
-        temp_keys = [k for k in d if k.startswith('temperature_2m_mean')]
-        rain_keys = [k for k in d if k.startswith('precipitation_sum')]
-        if not dates or not temp_keys:
-            return out
+            'start_date': '2025-01-01',
+            'end_date': '2050-12-31',
+            'models': 'MRI_AGCM3_2_S',
+            'daily': 'precipitation_sum,temperature_2m_max,temperature_2m_min',
+            'timezone': WEATHER_TIMEZONE,
+        },
+        timeout=60,
+    )
+    if not isinstance(data, dict):
+        return None
+    if data.get('error'):
+        logger.warning("Open-Meteo climate projection returned an error: %s", data.get('reason'))
+        return None
 
-        buckets: dict[str, dict[str, list]] = {label: {'temp': [], 'rain': []} for label in horizons_def}
-        for i, ds in enumerate(dates):
-            try:
-                year = int(str(ds)[:4])
-            except (ValueError, TypeError):
-                continue
-            t_vals = [d[k][i] for k in temp_keys if i < len(d[k]) and d[k][i] is not None]
-            p_vals = [d[k][i] for k in rain_keys if i < len(d[k]) and d[k][i] is not None]
-            t_mean = sum(t_vals) / len(t_vals) if t_vals else None
-            p_mean = sum(p_vals) / len(p_vals) if p_vals else None
-            for label, (lo, hi) in horizons_def.items():
-                if lo <= year <= hi:
-                    if t_mean is not None: buckets[label]['temp'].append(t_mean)
-                    if p_mean is not None: buckets[label]['rain'].append(p_mean)
+    daily = data.get('daily') or {}
+    dates = daily.get('time') or []
+    rainfall = daily.get('precipitation_sum') or []
+    max_temps = daily.get('temperature_2m_max') or []
 
-        for label, (lo, hi) in horizons_def.items():
-            t = buckets[label]['temp']
-            p = buckets[label]['rain']
-            n_years = max(1, hi - lo + 1)
-            out['horizons'][label] = {
-                'temp_mean_c': round(sum(t) / len(t), 2) if t else None,
-                'annual_rain_mm': round(sum(p) / n_years, 1) if p else None,
-            }
-        return out
-    except Exception as e:
-        logger.error(f"Open-Meteo climate projection error: {e}")
-        return out
+    if not dates:
+        return None
+
+    per_year: dict[int, dict[str, list | float]] = defaultdict(
+        lambda: {
+            'rainfall_total': 0.0,
+            'max_temps': [],
+        }
+    )
+
+    for index, date_value in enumerate(dates):
+        try:
+            year = int(str(date_value)[:4])
+        except (TypeError, ValueError):
+            continue
+
+        rain_value = _safe_float(rainfall[index]) if index < len(rainfall) else None
+        max_temp = _safe_float(max_temps[index]) if index < len(max_temps) else None
+        bucket = per_year[year]
+
+        if rain_value is not None:
+            bucket['rainfall_total'] += rain_value
+        if max_temp is not None:
+            bucket['max_temps'].append(max_temp)
+
+    def _projection_snapshot(target_year: int) -> dict:
+        bucket = per_year.get(target_year) or {}
+        return {
+            'avg_annual_rainfall_mm': round(float(bucket.get('rainfall_total', 0.0)), 2)
+            if bucket
+            else None,
+            'avg_max_temp_c': _round_or_none(_average(bucket.get('max_temps', []))),  # type: ignore[arg-type]
+        }
+
+    projection_2025 = _projection_snapshot(2025)
+    projection_2050 = _projection_snapshot(2050)
+    rainfall_2025 = projection_2025['avg_annual_rainfall_mm']
+    rainfall_2050 = projection_2050['avg_annual_rainfall_mm']
+    temp_2025 = projection_2025['avg_max_temp_c']
+    temp_2050 = projection_2050['avg_max_temp_c']
+
+    rainfall_change_percent = None
+    if rainfall_2025 not in (None, 0) and rainfall_2050 is not None:
+        rainfall_change_percent = round(((rainfall_2050 - rainfall_2025) / rainfall_2025) * 100, 2)
+
+    temp_change_c = None
+    if temp_2025 is not None and temp_2050 is not None:
+        temp_change_c = round(temp_2050 - temp_2025, 2)
+
+    if rainfall_change_percent is None:
+        flood_risk_trajectory = 'stable'
+    elif rainfall_change_percent > FLOOD_TRAJECTORY_THRESHOLD_RATIO * 100:
+        flood_risk_trajectory = 'worsening'
+    elif rainfall_change_percent < -FLOOD_TRAJECTORY_THRESHOLD_RATIO * 100:
+        flood_risk_trajectory = 'improving'
+    else:
+        flood_risk_trajectory = 'stable'
+
+    return {
+        'projection_2030': _projection_snapshot(2030),
+        'projection_2035': _projection_snapshot(2035),
+        'projection_2040': _projection_snapshot(2040),
+        'projection_2050': projection_2050,
+        'rainfall_change_2025_to_2050_percent': rainfall_change_percent,
+        'temp_change_2025_to_2050_c': temp_change_c,
+        'flood_risk_trajectory': flood_risk_trajectory,
+        'model': 'MRI_AGCM3_2_S',
+    }
 
 
-def summarise_weather(current: dict | None, historical: dict | None,
-                      projection: dict | None) -> str:
-    """One-paragraph plain-English summary the AI grounds its prompt on."""
-    parts = []
-    if current and current.get('temperature_c') is not None:
+def summarise_weather(
+    current: dict | None,
+    historical: dict | None,
+    projection: dict | None,
+) -> str:
+    """Build a concise weather summary string for UI and AI grounding."""
+    parts: list[str] = []
+
+    if current:
         parts.append(
-            f"Now: {current['temperature_c']}°C, "
-            f"humidity {current.get('humidity_pct', '?')}%, "
-            f"wind {current.get('wind_kph', '?')} km/h."
-        )
-    if historical and historical.get('baseline_temp_c') and historical.get('recent_temp_c'):
-        delta_t = round(historical['recent_temp_c'] - historical['baseline_temp_c'], 2)
-        parts.append(
-            f"30-year ERA5 trend: temperature shifted by "
-            f"{'+' if delta_t >= 0 else ''}{delta_t}°C "
-            f"({historical['period']})."
-        )
-        if historical.get('baseline_rain_mm') and historical.get('recent_rain_mm'):
-            delta_r = round(
-                ((historical['recent_rain_mm'] - historical['baseline_rain_mm'])
-                 / max(1, historical['baseline_rain_mm'])) * 100, 1
+            (
+                f"Current conditions: {current.get('temperature_c', '?')} C, "
+                f"{current.get('humidity_percent', '?')}% humidity, "
+                f"{current.get('precipitation_mm', '?')} mm precipitation, "
+                f"{current.get('description', 'Unknown conditions')}."
             )
-            parts.append(
-                f"Annual rainfall {'+' if delta_r >= 0 else ''}{delta_r}% "
-                f"vs the 1990s baseline."
-            )
-    if projection and projection.get('horizons', {}).get('2050', {}).get('temp_mean_c'):
-        h2050 = projection['horizons']['2050']
-        parts.append(
-            f"CMIP6 2050 outlook: ~{h2050['temp_mean_c']}°C mean, "
-            f"~{h2050.get('annual_rain_mm', '?')} mm/yr rainfall."
         )
+
+    if historical:
+        parts.append(
+            (
+                f"Historical climate: average annual rainfall "
+                f"{historical.get('avg_annual_rainfall_mm', '?')} mm with a "
+                f"{historical.get('rainfall_trend', 'stable')} trend; average maximum temperature "
+                f"{historical.get('avg_max_temp_c', '?')} C with a "
+                f"{historical.get('temp_trend', 'stable')} trend."
+            )
+        )
+
+    if projection:
+        projection_2050 = projection.get('projection_2050') or {}
+        parts.append(
+            (
+                f"Climate projection ({projection.get('model', 'model unavailable')}): 2050 rainfall "
+                f"{projection_2050.get('avg_annual_rainfall_mm', '?')} mm/year, average max temperature "
+                f"{projection_2050.get('avg_max_temp_c', '?')} C, flood trajectory "
+                f"{projection.get('flood_risk_trajectory', 'stable')}."
+            )
+        )
+
     return ' '.join(parts)

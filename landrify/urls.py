@@ -6,7 +6,10 @@ from django.shortcuts import render
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
 def tester_view(request):
-    return render(request, 'tester.html')
+    api_base_url = (getattr(settings, 'API_BASE_URL', '') or '').rstrip('/')
+    if not api_base_url:
+        api_base_url = request.build_absolute_uri('/').rstrip('/')
+    return render(request, 'tester.html', {'api_base_url': api_base_url})
 
 def home_redirect(request):
     from django.http import HttpResponseRedirect

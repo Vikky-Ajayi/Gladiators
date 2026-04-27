@@ -21,9 +21,6 @@ declare global {
   }
 }
 
-const CLIENT_ID =
-  (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID ?? '';
-
 /**
  * Renders the official Google Identity Services button.
  *
@@ -40,12 +37,13 @@ export function GoogleSignInButton({
   text = 'continue_with',
   className,
 }: Props) {
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '';
   const ref = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!CLIENT_ID || !ref.current) return;
+    if (!clientId || !ref.current) return;
 
     let cancelled = false;
     let attempts = 0;
@@ -58,7 +56,7 @@ export function GoogleSignInButton({
         return;
       }
       g.accounts.id.initialize({
-        client_id: CLIENT_ID,
+        client_id: clientId,
         callback: async (response: { credential: string }) => {
           setError(null);
           setBusy(true);
@@ -92,9 +90,9 @@ export function GoogleSignInButton({
     return () => {
       cancelled = true;
     };
-  }, [onAuthenticated, text]);
+  }, [clientId, onAuthenticated, text]);
 
-  if (!CLIENT_ID) {
+  if (!clientId) {
     return (
       <div className="text-center text-xs text-gray-400 py-2">
         Google sign-in is not configured.

@@ -28,6 +28,8 @@ import requests
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+HTTP_SESSION = requests.Session()
+HTTP_SESSION.trust_env = False
 
 
 def _endpoints():
@@ -73,7 +75,7 @@ def _get_token(client_id, client_secret):
 
     creds = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
     try:
-        r = requests.post(
+        r = HTTP_SESSION.post(
             _endpoints()["passport"],
             headers={"Authorization": f"Basic {creds}", "Content-Type": "application/x-www-form-urlencoded"},
             data={"grant_type": "client_credentials"},
@@ -86,6 +88,8 @@ def _get_token(client_id, client_secret):
         logger.error(f"Interswitch token error: {d}")
     except requests.RequestException as e:
         logger.error(f"Interswitch passport failed: {e}")
+    except ValueError as e:
+        logger.error(f"Interswitch token response was not valid JSON: {e}")
     return None
 
 
@@ -142,7 +146,7 @@ class InterswitchPaymentClient:
 
         eps = _endpoints()
         try:
-            requests.post(
+            HTTP_SESSION.post(
                 eps["webpay_init"],
                 headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
                 json={
@@ -210,7 +214,7 @@ class InterswitchPaymentClient:
         ).hexdigest()
 
         try:
-            r = requests.get(
+            r = HTTP_SESSION.get(
                 _endpoints()["webpay_verify"],
                 headers={"Authorization": f"Bearer {token}", "Hash": txn_hash},
                 params={
@@ -231,6 +235,9 @@ class InterswitchPaymentClient:
         except requests.RequestException as e:
             logger.error(f"Webpay verify error: {e}")
             return {"status": False, "message": str(e)}
+        except ValueError as e:
+            logger.error(f"Webpay verify response was not valid JSON: {e}")
+            return {"status": False, "message": "Invalid gateway response."}
 
     def compute_redirect_hash(self, transaction_ref, amount_naira):
         amount_kobo = int(amount_naira * 100)
@@ -294,7 +301,7 @@ class InterswitchIdentityClient:
             payload["dateOfBirth"] = date_of_birth
 
         try:
-            r = requests.post(
+            r = HTTP_SESSION.post(
                 _endpoints()["identity"],
                 headers={
                     "Authorization": f"Bearer {token}",
@@ -327,3 +334,6 @@ class InterswitchIdentityClient:
         except requests.RequestException as e:
             logger.error(f"Identity API error: {e}")
             return {"verified": False, "error": "Identity service unavailable. Please try again."}
+        except ValueError as e:
+            logger.error(f"Identity API response was not valid JSON: {e}")
+            return {"verified": False, "error": "Identity service returned an invalid response."}

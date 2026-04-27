@@ -2,521 +2,694 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
-  MapPin, Navigation, Search, AlertCircle, X, Crosshair, Layers, Loader2,
-  Sparkles, ChevronRight, Compass,
+  AlertCircle,
+  CheckCircle2,
+  Compass,
+  Crosshair,
+  Layers,
+  Link2,
+  Loader2,
+  MapPin,
+  Navigation,
+  Search,
+  Sparkles,
+  X,
 } from 'lucide-react';
+
+import { createScan, demoScan, geocodeAddress, reverseGeocode, type GeocodeResult } from '../api/scans';
+import { MapPreview } from '../components/MapPreview';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { createScan, demoScan, geocodeAddress, reverseGeocode, type GeocodeResult } from '../api/scans';
 import type { ScanResult } from '../types/api';
-import { MapPreview } from '../components/MapPreview';
-
-// ── Constants ─────────────────────────────────────────────────────────────────
 
 const QUICK_LOCATIONS = [
-  { label: 'Lekki, Lagos',    sub: 'Coastal — high flood risk',   latitude: 6.4698, longitude: 3.5852 },
-  { label: 'Maitama, Abuja',  sub: 'FCT — federal land',          latitude: 9.082,  longitude: 7.492  },
-  { label: 'Ibeju-Lekki',     sub: 'Free Trade Zone overlap',     latitude: 6.41,   longitude: 3.91   },
-  { label: 'Port Harcourt',   sub: 'Niger Delta — tidal flooding',latitude: 4.8156, longitude: 7.0498 },
-  { label: 'Onitsha, Anambra',sub: 'Niger River floodplain',      latitude: 6.1500, longitude: 6.7833 },
-  { label: 'Lokoja, Kogi',    sub: 'Niger-Benue confluence',      latitude: 7.8023, longitude: 6.7333 },
+  { label: 'Lekki, Lagos', sub: 'Coastal flood exposure', latitude: 6.4698, longitude: 3.5852 },
+  { label: 'Maitama, Abuja', sub: 'Core FCT district', latitude: 9.082, longitude: 7.492 },
+  { label: 'Ibeju-Lekki', sub: 'Government acquisition overlap', latitude: 6.41, longitude: 3.91 },
+  { label: 'Port Harcourt', sub: 'Niger Delta tidal exposure', latitude: 4.8156, longitude: 7.0498 },
+  { label: 'Lokoja, Kogi', sub: 'Niger-Benue confluence', latitude: 7.8023, longitude: 6.7333 },
+  { label: 'Onitsha, Anambra', sub: 'River Niger floodplain', latitude: 6.15, longitude: 6.7833 },
 ] as const;
 
-/**
- * Nigerian land-area presets. The displayed scan circle radius is derived
- * directly from the parcel area: r = √(area / π) so the circle on the map
- * accurately reflects the size of the land the buyer is scanning. (The
- * backend still pulls in surrounding flood-zone / dam / climate context
- * regardless of the visible disc.)
- */
-const _r = (areaSqm: number) => Math.sqrt(areaSqm / Math.PI) / 1000; // km
-const RADIUS_PRESETS: Array<{ key: string; label: string; sub: string; areaSqm: number; km: number }> = [
-  { key: 'half-plot', label: 'Half plot',     sub: '~324 m²',           areaSqm:    324, km: _r(324)    },
-  { key: 'plot',      label: '1 plot',        sub: '648 m² · 60×120 ft', areaSqm:    648, km: _r(648)    },
-  { key: '2-plots',   label: '2 plots',       sub: '1,296 m²',          areaSqm:   1296, km: _r(1296)   },
-  { key: 'half-acre', label: 'Half acre',     sub: '2,023 m²',          areaSqm:   2023, km: _r(2023)   },
-  { key: 'acre',      label: '1 acre',        sub: '4,047 m² · ≈6 plots', areaSqm:   4047, km: _r(4047)   },
-  { key: 'hectare',   label: '1 hectare',     sub: '10,000 m² · ≈15 plots', areaSqm:  10000, km: _r(10000)  },
-  { key: '5-hectare', label: '5 hectares',    sub: '50,000 m²',         areaSqm:  50000, km: _r(50000)  },
-  { key: 'estate',    label: 'Small estate',  sub: '12 hectares',       areaSqm: 120000, km: _r(120000) },
-  { key: 'district',  label: 'District-scale', sub: '~50 hectares',      areaSqm: 500000, km: _r(500000) },
-];
+const RADIUS_OPTIONS = [
+  {
+    key: 'single-plot',
+    label: 'Single Plot',
+    radiusKm: 0.05,
+    description: '~50m — one residential plot',
+  },
+  {
+    key: 'small-estate',
+    label: 'Small Estate',
+    radiusKm: 0.25,
+    description: '~250m — a small compound or estate',
+  },
+  {
+    key: 'neighbourhood',
+    label: 'Neighbourhood',
+    radiusKm: 0.5,
+    description: '~500m — a street or small area',
+  },
+  {
+    key: 'large-area',
+    label: 'Large Area',
+    radiusKm: 1.0,
+    description: '~1km — a large estate or block',
+  },
+  {
+    key: 'town-boundary',
+    label: 'Town Boundary',
+    radiusKm: 2.5,
+    description: '~2.5km — a village or district',
+  },
+  {
+    key: 'custom',
+    label: 'Custom',
+    radiusKm: null,
+    description: 'Enter exact km value',
+  },
+] as const;
 
-function formatArea(sqm: number): string {
-  if (sqm < 10000) return `${sqm.toLocaleString()} m²`;
-  return `${(sqm / 10000).toFixed(sqm < 100000 ? 2 : 1)} ha`;
-}
+const TAB_CONFIG = [
+  { key: 'address', label: 'Address', icon: Search, help: 'Search any Nigerian street, community, landmark, LGA, or state.' },
+  { key: 'shared', label: 'Shared Link', icon: Link2, help: 'Paste a Google Maps share link or raw lat,lng text.' },
+  { key: 'gps', label: 'My Location', icon: Crosshair, help: 'Use your current GPS position.' },
+  { key: 'map', label: 'Pick on Map', icon: Layers, help: 'Drop a pin manually on the map.' },
+  { key: 'manual', label: 'Coordinates', icon: Compass, help: 'Type latitude and longitude directly.' },
+  { key: 'quick', label: 'Quick Picks', icon: Sparkles, help: 'Load a popular Nigerian location instantly.' },
+] as const;
 
-const RISK_COLORS: Record<string, string> = {
-  low: '#4ade80',
-  medium: '#fbbf24',
-  high: '#fb923c',
-  critical: '#f87171',
-  very_high: '#f87171',
-  unknown: '#d1d5db',
+const OLIVE_CLASSES = {
+  active: 'border-[#6b8e23] bg-[#6b8e23]/10 text-[#556b2f] ring-1 ring-[#6b8e23]/30',
+  idle: 'border-landrify-line hover:border-[#6b8e23]/40 hover:bg-[#6b8e23]/5 text-gray-900',
 };
 
-const RING_R = 70;
-const RING_C = 2 * Math.PI * RING_R;
-
-type ScanMethod = 'address' | 'gps' | 'map' | 'quick' | 'manual';
-
-const TABS: Array<{ key: ScanMethod; label: string; icon: any; help: string }> = [
-  { key: 'address', label: 'Address',    icon: Search,    help: 'Type a street, area or landmark' },
-  { key: 'gps',     label: 'My location', icon: Crosshair, help: 'Use your phone’s GPS' },
-  { key: 'map',     label: 'Pick on map', icon: Layers,    help: 'Drop a pin on the satellite' },
-  { key: 'quick',   label: 'Quick picks', icon: Sparkles,  help: 'Try a popular Nigerian location' },
-  { key: 'manual',  label: 'Coordinates', icon: Compass,   help: 'Paste latitude / longitude' },
-];
+type ScanMethod = (typeof TAB_CONFIG)[number]['key'];
+type GpsState = 'idle' | 'loading' | 'success';
 
 function formatRiskLevel(level?: string | null) {
   return (level ?? 'unknown').replace('_', ' ').toUpperCase();
 }
 
-// ── Inline result card (unchanged shape from before) ──────────────────────────
+function isWithinNigeria(latitude: number, longitude: number) {
+  return latitude >= 4 && latitude <= 14 && longitude >= 2.5 && longitude <= 15;
+}
+
+function parseSharedLocation(input: string) {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const patterns = [
+    /[?&]q=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/i,
+    /\/@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/i,
+    /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = trimmed.match(pattern);
+    if (!match) continue;
+
+    const latitude = Number.parseFloat(match[1]);
+    const longitude = Number.parseFloat(match[2]);
+    if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
+      return null;
+    }
+    if (!isWithinNigeria(latitude, longitude)) {
+      return { latitude, longitude, valid: false };
+    }
+    return { latitude, longitude, valid: true };
+  }
+
+  return null;
+}
 
 function InlineResult({ result }: { result: ScanResult }) {
-  const score = typeof result.risk_score === 'number' ? result.risk_score : 0;
-  const ringColor = RISK_COLORS[result.risk_level] ?? RISK_COLORS.unknown;
-  const dashOffset = RING_C - (Math.max(0, Math.min(score, 100)) / 100) * RING_C;
   return (
-    <div className="space-y-6 mt-10">
-      <div className="bg-white rounded-3xl border border-landrify-line shadow-lg p-8">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="text-sm text-gray-500">{result.scan_reference}</p>
-            <h2 className="text-2xl md:text-3xl font-serif text-landrify-ink mt-1">{result.address}</h2>
-            <p className="text-gray-600 mt-1">{result.lga}, {result.state}</p>
-          </div>
-          <span className="px-4 py-1 rounded-full text-sm font-semibold bg-landrify-green/10 text-landrify-green">
-            {result.scan_type === 'pro' ? 'Pro ⭐' : 'Basic'}
-          </span>
+    <div className="mt-10 rounded-3xl border border-landrify-line bg-white p-6 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs uppercase tracking-widest text-gray-500">{result.scan_reference}</p>
+          <h2 className="mt-1 text-2xl font-serif text-landrify-ink">{result.address || result.address_hint || 'Scanned location'}</h2>
+          <p className="mt-1 text-sm text-gray-500">{result.lga}, {result.state}</p>
         </div>
-        {result.satellite_image_url && (
-          <img
-            src={result.satellite_image_url}
-            alt="Satellite scan"
-            className="w-full mt-6 rounded-2xl object-cover max-h-72"
-            referrerPolicy="no-referrer"
-          />
-        )}
+        <span className="rounded-full bg-landrify-green/10 px-4 py-1 text-sm font-semibold text-landrify-green">
+          {result.scan_type === 'pro' ? 'Pro' : 'Basic'}
+        </span>
       </div>
 
-      <div className="bg-white rounded-3xl border border-landrify-line shadow-lg p-8 flex flex-col items-center">
-        <div className="relative w-44 h-44">
-          <svg className="w-full h-full -rotate-90">
-            <circle cx="88" cy="88" r={RING_R} fill="none" stroke="#e5e7eb" strokeWidth="12" />
-            <circle cx="88" cy="88" r={RING_R} fill="none" stroke={ringColor}
-              strokeWidth="12" strokeDasharray={RING_C} strokeDashoffset={dashOffset} strokeLinecap="round" />
-          </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-4xl font-bold text-landrify-ink">{score}</span>
-            <span className="text-xs tracking-widest text-gray-500">RISK SCORE</span>
-          </div>
-        </div>
-        <p className="font-semibold mt-3">{formatRiskLevel(result.risk_level)}</p>
-      </div>
+      {result.satellite_image_url && (
+        <img
+          src={result.satellite_image_url}
+          alt="Satellite preview"
+          className="mt-6 min-h-[180px] w-full rounded-2xl object-cover md:min-h-[220px]"
+          referrerPolicy="no-referrer"
+        />
+      )}
 
-      <div className="grid md:grid-cols-2 gap-6">
-        <div className="bg-white rounded-3xl border border-landrify-line shadow-lg p-6 space-y-3">
-          <h3 className="text-xl font-serif">Legal Status</h3>
-          {result.legal_status.is_government_land ? (
-            <p className="text-red-600 font-semibold">
-              ⚠️ GOVERNMENT ACQUISITION AREA
-              {result.legal_status.authority ? ` — ${result.legal_status.authority}` : ''}
-            </p>
-          ) : (
-            <p className="text-green-600 font-semibold">No government acquisition records found</p>
-          )}
-          {result.legal_status.gazette_reference && (
-            <p className="text-sm text-gray-700">Gazette: {result.legal_status.gazette_reference}</p>
-          )}
-          {result.legal_status.notes && <p className="text-sm text-gray-500">{result.legal_status.notes}</p>}
+      <div className="mt-6 grid gap-4 md:grid-cols-2">
+        <div className="rounded-2xl border border-landrify-line p-4">
+          <p className="text-xs uppercase tracking-widest text-gray-500">Risk Score</p>
+          <p className="mt-1 text-3xl font-bold text-landrify-ink">{result.risk_score ?? '—'}</p>
+          <p className="text-sm text-gray-500">{formatRiskLevel(result.risk_level)}</p>
         </div>
-        <div className="bg-white rounded-3xl border border-landrify-line shadow-lg p-6 space-y-3">
-          <h3 className="text-xl font-serif">Environmental</h3>
-          <p><span className="font-semibold">Flood Risk:</span> {formatRiskLevel(result.environmental_risks.flood.risk_level)}</p>
-          <p className="text-sm text-gray-500">{result.environmental_risks.flood.zone_name}</p>
-          <p><span className="font-semibold">Erosion Risk:</span> {formatRiskLevel(result.environmental_risks.erosion.risk_level)}</p>
-          <p>
-            <span className="font-semibold">Nearest Dam:</span>{' '}
-            {result.environmental_risks.dam_proximity.nearest_dam}{' '}
-            ({result.environmental_risks.dam_proximity.distance_km}km away)
+        <div className="rounded-2xl border border-landrify-line p-4">
+          <p className="text-xs uppercase tracking-widest text-gray-500">Flood Risk</p>
+          <p className="mt-1 text-lg font-semibold text-landrify-ink">
+            {formatRiskLevel(result.environmental_risks?.flood?.risk_level)}
           </p>
-          <p><span className="font-semibold">Elevation:</span> {result.elevation_meters ?? 'N/A'}m above sea level</p>
+          <p className="text-sm text-gray-500">{result.environmental_risks?.flood?.zone_name || 'No zone name available'}</p>
         </div>
       </div>
     </div>
   );
 }
 
-// ── Main NewScan page ─────────────────────────────────────────────────────────
-
 export function NewScan() {
   const navigate = useNavigate();
 
-  const [tab, setTab] = useState<ScanMethod>('address');
-  const [latitude, setLat] = useState<number | null>(null);
-  const [longitude, setLng] = useState<number | null>(null);
-  const [address, setAddress] = useState<string>('');
-  const [pickedLabel, setPickedLabel] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<ScanMethod>('address');
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [confirmedAddress, setConfirmedAddress] = useState('');
+  const [selectedLocationLabel, setSelectedLocationLabel] = useState('');
+  const [plotDescription, setPlotDescription] = useState('');
   const [accuracy, setAccuracy] = useState<number | null>(null);
+  const [gpsState, setGpsState] = useState<GpsState>('idle');
 
-  const [radiusKey, setRadiusKey] = useState<string>('plot');
-  const radiusKm = useMemo(
-    () => RADIUS_PRESETS.find((p) => p.key === radiusKey)?.km ?? 0.030,
-    [radiusKey],
-  );
+  const [addressQuery, setAddressQuery] = useState('');
+  const [addressResults, setAddressResults] = useState<GeocodeResult[]>([]);
+  const [addressSearching, setAddressSearching] = useState(false);
+  const addressDebounceRef = useRef<number | null>(null);
+
+  const [sharedLocationInput, setSharedLocationInput] = useState('');
+  const [manualLatitude, setManualLatitude] = useState('');
+  const [manualLongitude, setManualLongitude] = useState('');
+
+  const [radiusKey, setRadiusKey] = useState<(typeof RADIUS_OPTIONS)[number]['key']>('single-plot');
+  const [customRadiusKm, setCustomRadiusKm] = useState('0.05');
 
   const [loading, setLoading] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [demoResult, setDemoResult] = useState<ScanResult | null>(null);
 
-  // ── Address search ──
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<GeocodeResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const debounceRef = useRef<number | null>(null);
+  const radiusKm = useMemo(() => {
+    const selected = RADIUS_OPTIONS.find((option) => option.key === radiusKey);
+    if (!selected) return 0.05;
+    if (selected.radiusKm != null) return selected.radiusKm;
+
+    const numericCustom = Number.parseFloat(customRadiusKm);
+    return Number.isFinite(numericCustom) ? numericCustom : 0;
+  }, [customRadiusKm, radiusKey]);
+
+  const radiusMeters = useMemo(() => Math.round(radiusKm * 1000), [radiusKm]);
+  const isLocationReady = latitude != null && longitude != null;
 
   useEffect(() => {
-    if (tab !== 'address') return;
-    if (debounceRef.current) window.clearTimeout(debounceRef.current);
-    if (query.trim().length < 3) { setResults([]); return; }
-    setSearching(true);
-    debounceRef.current = window.setTimeout(async () => {
-      try {
-        const data = await geocodeAddress(query.trim(), 6);
-        setResults(data.results);
-      } catch {
-        setResults([]);
-      } finally {
-        setSearching(false);
-      }
-    }, 350);
-    return () => { if (debounceRef.current) window.clearTimeout(debounceRef.current); };
-  }, [query, tab]);
+    if (activeTab !== 'address') return;
+    if (addressDebounceRef.current) window.clearTimeout(addressDebounceRef.current);
 
-  const pickResult = (r: GeocodeResult) => {
-    setLat(r.latitude); setLng(r.longitude);
-    setAddress(r.label);
-    setPickedLabel(r.label.split(',').slice(0, 3).join(', '));
-    setError(null);
-    setResults([]);
-    setQuery(r.label.split(',').slice(0, 2).join(', '));
-  };
-
-  // ── GPS ──
-  const [gpsBusy, setGpsBusy] = useState(false);
-  const useGps = () => {
-    setError(null); setGpsBusy(true);
-    if (!('geolocation' in navigator)) {
-      setGpsBusy(false);
-      setError('Geolocation is not supported by your browser.');
+    const query = addressQuery.trim();
+    if (query.length < 3) {
+      setAddressResults([]);
+      setAddressSearching(false);
       return;
     }
+
+    setAddressSearching(true);
+    addressDebounceRef.current = window.setTimeout(async () => {
+      try {
+        const data = await geocodeAddress(query, 8);
+        setAddressResults(data.results ?? []);
+      } catch {
+        setAddressResults([]);
+      } finally {
+        setAddressSearching(false);
+      }
+    }, 300);
+
+    return () => {
+      if (addressDebounceRef.current) window.clearTimeout(addressDebounceRef.current);
+    };
+  }, [activeTab, addressQuery]);
+
+  const applyCoordinates = async (
+    newLatitude: number,
+    newLongitude: number,
+    options?: { label?: string; address?: string; accuracyMeters?: number | null },
+  ) => {
+    setLatitude(newLatitude);
+    setLongitude(newLongitude);
+    setAccuracy(options?.accuracyMeters ?? null);
+    setError(null);
+
+    if (options?.label) {
+      setSelectedLocationLabel(options.label);
+    }
+
+    if (options?.address) {
+      setConfirmedAddress(options.address);
+      if (!options?.label) {
+        setSelectedLocationLabel(options.address);
+      }
+      return;
+    }
+
+    try {
+      const reverse = await reverseGeocode(newLatitude, newLongitude);
+      const resolvedAddress = reverse.display_name || `${newLatitude.toFixed(6)}, ${newLongitude.toFixed(6)}`;
+      setConfirmedAddress(resolvedAddress);
+      if (!options?.label) {
+        setSelectedLocationLabel(resolvedAddress);
+      }
+    } catch {
+      const fallbackLabel = `${newLatitude.toFixed(6)}, ${newLongitude.toFixed(6)}`;
+      setConfirmedAddress(fallbackLabel);
+      if (!options?.label) {
+        setSelectedLocationLabel(fallbackLabel);
+      }
+    }
+  };
+
+  const handleAddressPick = async (result: GeocodeResult) => {
+    setAddressQuery(result.label);
+    setAddressResults([]);
+    await applyCoordinates(result.latitude, result.longitude, {
+      label: result.label,
+      address: result.label,
+    });
+  };
+
+  const handleUseGps = () => {
+    setError(null);
+    setGpsState('loading');
+
+    if (!('geolocation' in navigator)) {
+      setGpsState('idle');
+      setError('Geolocation is not supported by this browser.');
+      return;
+    }
+
     navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        setLat(pos.coords.latitude); setLng(pos.coords.longitude);
-        setAccuracy(Math.round(pos.coords.accuracy));
-        try {
-          const r = await reverseGeocode(pos.coords.latitude, pos.coords.longitude);
-          setAddress(r.display_name);
-          setPickedLabel(`${r.lga ?? ''}${r.lga && r.state ? ', ' : ''}${r.state ?? ''}`);
-        } catch { /* address optional */ }
-        setGpsBusy(false);
+      async (position) => {
+        await applyCoordinates(position.coords.latitude, position.coords.longitude, {
+          label: 'Current GPS location',
+          accuracyMeters: Math.round(position.coords.accuracy),
+        });
+        setGpsState('success');
       },
-      (e) => { setGpsBusy(false); setError(e.message || 'Could not read your location.'); },
+      (positionError) => {
+        setGpsState('idle');
+        setError(positionError.message || 'Could not read your location.');
+      },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     );
   };
 
-  // ── Map pick ──
-  const onMapPick = async (lat: number, lng: number) => {
-    setLat(lat); setLng(lng); setError(null);
-    try {
-      const r = await reverseGeocode(lat, lng);
-      setAddress(r.display_name);
-      setPickedLabel(`${r.lga ?? ''}${r.lga && r.state ? ', ' : ''}${r.state ?? ''}`);
-    } catch { /* optional */ }
+  const handleMapPick = async (newLatitude: number, newLongitude: number) => {
+    await applyCoordinates(newLatitude, newLongitude, {
+      label: 'Map pin location',
+    });
   };
 
-  // ── Quick pick ──
-  const pickQuick = (q: typeof QUICK_LOCATIONS[number]) => {
-    setLat(q.latitude); setLng(q.longitude);
-    setAddress(q.label); setPickedLabel(q.label);
-    setError(null);
+  const handleSharedLocationApply = async () => {
+    const parsed = parseSharedLocation(sharedLocationInput);
+    if (!parsed) {
+      setError('Paste a Google Maps share link or coordinates in lat,lng format.');
+      return;
+    }
+    if (!parsed.valid) {
+      setError('The parsed coordinates are outside Nigeria (lat 4–14, lng 2.5–15).');
+      return;
+    }
+
+    await applyCoordinates(parsed.latitude, parsed.longitude, {
+      label: 'Shared map link',
+    });
   };
 
-  // ── Manual ──
-  const [manualLat, setManualLat] = useState('');
-  const [manualLng, setManualLng] = useState('');
-  const applyManual = () => {
-    const la = parseFloat(manualLat), ln = parseFloat(manualLng);
-    if (Number.isNaN(la) || Number.isNaN(ln)) { setError('Enter valid latitude and longitude.'); return; }
-    if (la < 4 || la > 14 || ln < 2.5 || ln > 15) {
+  const handleManualApply = async () => {
+    const parsedLatitude = Number.parseFloat(manualLatitude);
+    const parsedLongitude = Number.parseFloat(manualLongitude);
+
+    if (!Number.isFinite(parsedLatitude) || !Number.isFinite(parsedLongitude)) {
+      setError('Enter valid numeric latitude and longitude.');
+      return;
+    }
+    if (!isWithinNigeria(parsedLatitude, parsedLongitude)) {
       setError('Coordinates appear outside Nigeria (lat 4–14, lng 2.5–15).');
       return;
     }
-    setLat(la); setLng(ln); setAddress(`${la.toFixed(5)}, ${ln.toFixed(5)}`);
-    setPickedLabel('Manual coordinates'); setError(null);
+
+    await applyCoordinates(parsedLatitude, parsedLongitude, {
+      label: 'Manual coordinates',
+    });
   };
 
-  // ── Submit ──
-  const ready = latitude != null && longitude != null;
+  const handleQuickPick = async (location: (typeof QUICK_LOCATIONS)[number]) => {
+    await applyCoordinates(location.latitude, location.longitude, {
+      label: location.label,
+      address: location.label,
+    });
+  };
 
-  const submit = async () => {
-    if (!ready) { setError('Pick a location first.'); return; }
-    setLoading(true); setError(null);
+  const clearSelection = () => {
+    setLatitude(null);
+    setLongitude(null);
+    setConfirmedAddress('');
+    setSelectedLocationLabel('');
+    setAccuracy(null);
+    setGpsState('idle');
+  };
+
+  const handleSubmit = async () => {
+    if (!isLocationReady) {
+      setError('Pick a location before running a scan.');
+      return;
+    }
+    if (!Number.isFinite(radiusKm) || radiusKm <= 0) {
+      setError('Enter a valid radius in kilometres.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    const addressHint = [plotDescription.trim(), confirmedAddress.trim()].filter(Boolean).join(' | ');
+
     try {
-      const result = await createScan({ latitude: latitude!, longitude: longitude!, radius_km: radiusKm });
+      const result = await createScan({
+        latitude,
+        longitude,
+        radius_km: radiusKm,
+        address_hint: addressHint,
+      });
       navigate(`/scans/${result.id}`);
-    } catch (err: any) {
-      setError(err?.response?.data?.error || err?.userMessage || 'Failed to create scan.');
+    } catch (submitError: any) {
+      setError(submitError?.response?.data?.error || submitError?.response?.data?.detail || 'Failed to create scan.');
     } finally {
       setLoading(false);
     }
   };
 
-  const tryDemo = async () => {
-    setDemoLoading(true); setError(null);
+  const handleDemoScan = async () => {
+    setDemoLoading(true);
+    setError(null);
     try {
-      const r = await demoScan('lekki');
-      setDemoResult(r);
-    } catch (e: any) {
-      setError(e?.response?.data?.error || 'Demo scan failed.');
-    } finally { setDemoLoading(false); }
+      const result = await demoScan('lekki_high_flood');
+      setDemoResult(result);
+    } catch (demoError: any) {
+      setError(demoError?.response?.data?.error || 'Demo scan failed.');
+    } finally {
+      setDemoLoading(false);
+    }
   };
 
-  // ── Render ──
   return (
     <div className="min-h-screen bg-gradient-to-b from-emerald-50/40 via-white to-white py-12">
-      <div className="max-w-6xl mx-auto px-4 lg:px-6">
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-          className="flex items-center gap-3 mb-2">
-          <Link to="/dashboard" className="text-sm text-gray-500 hover:text-landrify-green inline-flex items-center gap-1">
+      <div className="mx-auto max-w-6xl px-4 lg:px-6">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+          <Link to="/dashboard" className="inline-flex items-center gap-1 text-sm text-gray-500 transition-colors hover:text-landrify-green">
             ← Dashboard
           </Link>
+          <h1 className="mt-3 text-4xl font-serif text-landrify-ink md:text-5xl">Run a new scan</h1>
+          <p className="mt-2 max-w-3xl text-gray-500">
+            Choose how you want to locate the land, add any plot description you have, then pick the scan radius that best matches the parcel.
+          </p>
         </motion.div>
 
-        <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-          className="text-4xl md:text-5xl font-serif text-landrify-ink mb-2">
-          Run a new scan
-        </motion.h1>
-        <p className="text-gray-500 mb-10 max-w-2xl">
-          Choose how you want to locate the parcel — address search, GPS, drop a pin on
-          the satellite map, or paste raw coordinates. Then pick a Nigerian land-area preset
-          and start the scan.
-        </p>
+        <div className="mt-10 grid gap-8 lg:grid-cols-[1.08fr_1fr]">
+          <div className="overflow-hidden rounded-3xl border border-landrify-line bg-white shadow-sm">
+            <div className="border-b border-landrify-line bg-gray-50/70 px-2 pt-2">
+              <div className="flex flex-wrap gap-1">
+                {TAB_CONFIG.map((tab) => {
+                  const Icon = tab.icon;
+                  const active = tab.key === activeTab;
 
-        <div className="grid lg:grid-cols-[1.05fr_1fr] gap-8">
-          {/* ── LEFT: scan input ── */}
-          <div className="bg-white border border-landrify-line rounded-3xl shadow-sm overflow-hidden">
-            {/* Tabs */}
-            <div className="flex flex-wrap gap-1 border-b border-landrify-line/70 bg-gray-50/60 px-2 pt-2">
-              {TABS.map((t) => {
-                const Icon = t.icon;
-                const active = tab === t.key;
-                return (
-                  <button
-                    key={t.key}
-                    onClick={() => { setTab(t.key); setError(null); }}
-                    className={
-                      'group flex items-center gap-2 px-3.5 py-2.5 rounded-t-xl text-sm transition-colors ' +
-                      (active
-                        ? 'bg-white text-landrify-green font-semibold border border-b-white border-landrify-line'
-                        : 'text-gray-500 hover:text-gray-800')
-                    }
-                  >
-                    <Icon className="w-4 h-4" /> {t.label}
-                  </button>
-                );
-              })}
+                  return (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => {
+                        setActiveTab(tab.key);
+                        setError(null);
+                      }}
+                      className={
+                        'flex items-center gap-2 rounded-t-xl border px-3.5 py-2.5 text-sm transition-colors ' +
+                        (active
+                          ? 'border-landrify-line border-b-white bg-white font-semibold text-landrify-green'
+                          : 'border-transparent text-gray-500 hover:text-gray-800')
+                      }
+                    >
+                      <Icon className="h-4 w-4" />
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            <div className="p-6 md:p-8 space-y-6">
-              <p className="text-sm text-gray-500 -mt-2">{TABS.find((x) => x.key === tab)?.help}</p>
+            <div className="space-y-6 p-6 md:p-8">
+              <p className="text-sm text-gray-500">{TAB_CONFIG.find((tab) => tab.key === activeTab)?.help}</p>
 
-              {/* ── ADDRESS ── */}
-              {tab === 'address' && (
+              {activeTab === 'address' && (
                 <div className="space-y-3">
                   <div className="relative">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+                    <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
                     <Input
-                      value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                      placeholder="e.g. Admiralty Way, Lekki Phase 1"
-                      className="pl-12 h-12"
+                      value={addressQuery}
+                      onChange={(event) => setAddressQuery(event.target.value)}
+                      placeholder="Search any Nigerian address, landmark, town, LGA, or state"
+                      className="h-12 pl-12"
                     />
-                    {searching && <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-gray-400" />}
+                    {addressSearching && (
+                      <Loader2 className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-gray-400" />
+                    )}
                   </div>
-                  {results.length > 0 && (
-                    <div className="rounded-2xl border border-landrify-line divide-y divide-gray-100 max-h-72 overflow-y-auto">
-                      {results.map((r) => (
+
+                  {addressResults.length > 0 && (
+                    <div className="max-h-80 overflow-y-auto rounded-2xl border border-landrify-line">
+                      {addressResults.map((result) => (
                         <button
-                          key={`${r.place_id ?? `${r.latitude}-${r.longitude}`}`}
-                          onClick={() => pickResult(r)}
-                          className="w-full text-left px-4 py-3 hover:bg-emerald-50 transition-colors group"
+                          key={`${result.place_id ?? `${result.latitude}-${result.longitude}`}`}
+                          type="button"
+                          onClick={() => void handleAddressPick(result)}
+                          className="flex w-full items-start gap-3 border-b border-gray-100 px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-emerald-50/60"
                         >
-                          <div className="flex items-start gap-2">
-                            <MapPin className="w-4 h-4 text-landrify-green mt-1 flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm text-gray-900 truncate">{r.label}</p>
-                              <p className="text-[11px] text-gray-500 mt-0.5">
-                                {(r.state || 'Nigeria')} · {r.latitude.toFixed(4)}, {r.longitude.toFixed(4)}
-                              </p>
-                            </div>
-                            <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-landrify-green" />
+                          <MapPin className="mt-1 h-4 w-4 flex-shrink-0 text-landrify-green" />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm text-gray-900">{result.label}</p>
+                            <p className="mt-0.5 text-[11px] text-gray-500">
+                              {result.latitude.toFixed(5)}, {result.longitude.toFixed(5)}
+                            </p>
                           </div>
                         </button>
                       ))}
                     </div>
                   )}
-                  {!searching && query.length >= 3 && results.length === 0 && (
-                    <p className="text-xs text-gray-500">No matches found in Nigeria. Try a more specific area.</p>
+
+                  {confirmedAddress && activeTab === 'address' && (
+                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 px-4 py-3 text-sm text-emerald-800">
+                      <span className="font-semibold">Selected address:</span> {confirmedAddress}
+                    </div>
                   )}
                 </div>
               )}
 
-              {/* ── GPS ── */}
-              {tab === 'gps' && (
+              {activeTab === 'shared' && (
                 <div className="space-y-3">
-                  <Button onClick={useGps} disabled={gpsBusy} className="w-full h-12">
-                    {gpsBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Navigation className="w-4 h-4" />}
-                    <span className="ml-2">{gpsBusy ? 'Locating you…' : 'Use my current location'}</span>
+                  <Input
+                    value={sharedLocationInput}
+                    onChange={(event) => setSharedLocationInput(event.target.value)}
+                    placeholder="Paste a Google Maps share link or 6.4698,3.5852"
+                    className="h-12"
+                  />
+                  <Button type="button" variant="outline" className="h-11" onClick={() => void handleSharedLocationApply()}>
+                    <Link2 className="mr-2 h-4 w-4" />
+                    Use this shared location
+                  </Button>
+                </div>
+              )}
+
+              {activeTab === 'gps' && (
+                <div className="space-y-3">
+                  <Button type="button" className="h-12 w-full" onClick={handleUseGps} disabled={gpsState === 'loading'}>
+                    {gpsState === 'loading' ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : gpsState === 'success' ? (
+                      <CheckCircle2 className="h-4 w-4" />
+                    ) : (
+                      <Navigation className="h-4 w-4" />
+                    )}
+                    <span className="ml-2">
+                      {gpsState === 'loading'
+                        ? 'Finding your location…'
+                        : gpsState === 'success'
+                          ? 'GPS coordinates captured'
+                          : 'Use my current location'}
+                    </span>
                   </Button>
                   {accuracy != null && (
-                    <p className="text-xs text-gray-500">GPS accuracy ±{accuracy} m. For survey-grade results, walk to the centre of the parcel before tapping.</p>
+                    <p className="text-xs text-gray-500">GPS accuracy ±{accuracy}m.</p>
                   )}
                 </div>
               )}
 
-              {/* ── MAP ── */}
-              {tab === 'map' && (
-                <div className="space-y-2 text-sm text-gray-600">
-                  <p>Click anywhere on the satellite map on the right to drop a pin. Click again to move it.</p>
-                </div>
+              {activeTab === 'map' && (
+                <p className="text-sm text-gray-500">
+                  Click anywhere on the map to drop a pin, then move it until the location matches the parcel.
+                </p>
               )}
 
-              {/* ── QUICK ── */}
-              {tab === 'quick' && (
-                <div className="grid sm:grid-cols-2 gap-2">
-                  {QUICK_LOCATIONS.map((q) => (
-                    <button
-                      key={q.label}
-                      onClick={() => pickQuick(q)}
-                      className="text-left rounded-2xl border border-landrify-line px-4 py-3 hover:border-landrify-green hover:bg-emerald-50/40 transition-colors"
-                    >
-                      <p className="text-sm font-medium text-gray-900">{q.label}</p>
-                      <p className="text-[11px] text-gray-500 mt-0.5">{q.sub}</p>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* ── MANUAL ── */}
-              {tab === 'manual' && (
-                <div className="grid grid-cols-2 gap-3">
-                  <Input value={manualLat} onChange={(e) => setManualLat(e.target.value)} placeholder="Latitude (e.g. 6.4698)" />
-                  <Input value={manualLng} onChange={(e) => setManualLng(e.target.value)} placeholder="Longitude (e.g. 3.5852)" />
-                  <Button onClick={applyManual} variant="outline" className="col-span-2 h-11">
+              {activeTab === 'manual' && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Input
+                    value={manualLatitude}
+                    onChange={(event) => setManualLatitude(event.target.value)}
+                    placeholder="Latitude"
+                  />
+                  <Input
+                    value={manualLongitude}
+                    onChange={(event) => setManualLongitude(event.target.value)}
+                    placeholder="Longitude"
+                  />
+                  <Button type="button" variant="outline" className="h-11 sm:col-span-2" onClick={() => void handleManualApply()}>
+                    <Compass className="mr-2 h-4 w-4" />
                     Use these coordinates
                   </Button>
                 </div>
               )}
 
-              {/* ── Selected location pill ── */}
-              {ready && (
-                <div className="flex items-start gap-3 rounded-2xl bg-emerald-50/60 border border-emerald-100 px-4 py-3">
-                  <MapPin className="w-5 h-5 text-landrify-green mt-0.5" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-emerald-900 truncate">{pickedLabel || 'Selected location'}</p>
-                    <p className="text-[11px] text-emerald-700 font-mono mt-0.5">
-                      {latitude!.toFixed(5)}, {longitude!.toFixed(5)}
+              {activeTab === 'quick' && (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {QUICK_LOCATIONS.map((location) => (
+                    <button
+                      key={location.label}
+                      type="button"
+                      onClick={() => void handleQuickPick(location)}
+                      className="rounded-2xl border border-landrify-line px-4 py-3 text-left transition-colors hover:border-landrify-green/40 hover:bg-emerald-50/40"
+                    >
+                      <p className="text-sm font-medium text-gray-900">{location.label}</p>
+                      <p className="mt-0.5 text-[11px] text-gray-500">{location.sub}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-900">Enter plot description</label>
+                <Input
+                  value={plotDescription}
+                  onChange={(event) => setPlotDescription(event.target.value)}
+                  placeholder="Plot 42, Block C, Lekki Phase 1"
+                  className="h-12"
+                />
+                <p className="text-xs text-gray-500">
+                  This extra description will be stored with the scan and included in the AI report for context.
+                </p>
+              </div>
+
+              {isLocationReady && (
+                <div className="flex items-start gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/60 px-4 py-3">
+                  <MapPin className="mt-0.5 h-5 w-5 text-landrify-green" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-emerald-900">
+                      {selectedLocationLabel || 'Selected location'}
                     </p>
-                    {address && address !== pickedLabel && (
-                      <p className="text-[11px] text-emerald-700/80 truncate mt-0.5">{address}</p>
+                    <p className="mt-0.5 font-mono text-[11px] text-emerald-800">
+                      {latitude?.toFixed(6)}, {longitude?.toFixed(6)}
+                    </p>
+                    {confirmedAddress && (
+                      <p className="mt-0.5 truncate text-[11px] text-emerald-700">{confirmedAddress}</p>
                     )}
                   </div>
-                  <button onClick={() => { setLat(null); setLng(null); setAddress(''); setPickedLabel(''); setAccuracy(null); }}
-                    className="text-emerald-700 hover:text-emerald-900" aria-label="Clear">
-                    <X className="w-4 h-4" />
+                  <button type="button" onClick={clearSelection} aria-label="Clear selected location" className="text-emerald-700 hover:text-emerald-900">
+                    <X className="h-4 w-4" />
                   </button>
                 </div>
               )}
 
-              {/* ── Radius presets ── */}
-              <div>
-                <div className="flex items-baseline justify-between mb-2">
-                  <h3 className="text-sm font-semibold text-gray-900">Plot size</h3>
-                  <span className="text-[11px] text-gray-500">
-                    Plot area: <span className="font-semibold text-landrify-green">
-                      {formatArea(RADIUS_PRESETS.find(p => p.key === radiusKey)?.areaSqm ?? 0)}
-                    </span>
-                    {' '}· radius {(radiusKm * 1000).toFixed(1)} m
-                  </span>
+              <div className="space-y-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <h3 className="text-sm font-semibold text-gray-900">Plot size selector</h3>
+                  <span className="text-xs text-gray-500">Selected radius: {radiusMeters || 0} metres</span>
                 </div>
-                <p className="text-xs text-gray-500 mb-3">
-                  Pick the closest standard Nigerian land-area unit — the green circle on the map shows the actual size.
-                </p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {RADIUS_PRESETS.map((p) => {
-                    const active = radiusKey === p.key;
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {RADIUS_OPTIONS.map((option) => {
+                    const active = option.key === radiusKey;
                     return (
                       <button
-                        key={p.key}
-                        onClick={() => setRadiusKey(p.key)}
+                        key={option.key}
+                        type="button"
+                        onClick={() => {
+                          setRadiusKey(option.key);
+                          setError(null);
+                        }}
                         className={
-                          'text-left rounded-xl border px-3 py-2.5 text-sm transition-colors ' +
-                          (active
-                            ? 'border-landrify-green bg-landrify-green/5 ring-1 ring-landrify-green/40'
-                            : 'border-landrify-line hover:border-landrify-green/40 hover:bg-emerald-50/40')
+                          'rounded-2xl border px-4 py-3 text-left transition-colors ' +
+                          (active ? OLIVE_CLASSES.active : OLIVE_CLASSES.idle)
                         }
                       >
-                        <p className={'font-medium ' + (active ? 'text-landrify-green' : 'text-gray-900')}>{p.label}</p>
-                        <p className="text-[10.5px] text-gray-500">{p.sub}</p>
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="font-semibold">{option.label}</p>
+                          <p className="text-sm font-medium">
+                            {option.radiusKm != null ? `${option.radiusKm} km` : 'Custom'}
+                          </p>
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500">{option.description}</p>
                       </button>
                     );
                   })}
                 </div>
+
+                {radiusKey === 'custom' && (
+                  <div className="rounded-2xl border border-landrify-line bg-gray-50/60 p-4">
+                    <label className="text-sm font-semibold text-gray-900">Custom radius (km)</label>
+                    <Input
+                      value={customRadiusKm}
+                      onChange={(event) => setCustomRadiusKm(event.target.value)}
+                      placeholder="0.05"
+                      className="mt-2 h-11"
+                    />
+                  </div>
+                )}
               </div>
 
-              {/* ── Errors ── */}
               {error && (
-                <div className="flex items-start gap-2 rounded-xl bg-red-50 border border-red-100 text-red-700 text-sm px-4 py-3">
-                  <AlertCircle className="w-4 h-4 mt-0.5" />
+                <div className="flex items-start gap-2 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  <AlertCircle className="mt-0.5 h-4 w-4" />
                   <span>{error}</span>
                 </div>
               )}
 
-              {/* ── Submit ── */}
-              <div className="flex flex-col sm:flex-row gap-3">
-                <Button onClick={submit} disabled={!ready || loading} className="flex-1 h-12">
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <Button type="button" className="h-12 flex-1" onClick={() => void handleSubmit()} disabled={!isLocationReady || loading}>
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                   <span className="ml-2">{loading ? 'Running scan…' : 'Run land scan'}</span>
                 </Button>
-                <Button onClick={tryDemo} variant="outline" disabled={demoLoading} className="sm:w-48 h-12">
-                  {demoLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                <Button type="button" variant="outline" className="h-12 sm:w-48" onClick={() => void handleDemoScan()} disabled={demoLoading}>
+                  {demoLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                   <span className="ml-2">{demoLoading ? 'Loading…' : 'Try a demo'}</span>
                 </Button>
               </div>
             </div>
           </div>
 
-          {/* ── RIGHT: live map preview ── */}
           <div className="space-y-4">
             <MapPreview
               latitude={latitude}
               longitude={longitude}
-              radiusKm={radiusKm}
-              onPick={tab === 'map' ? onMapPick : undefined}
-              className="shadow-sm border border-landrify-line"
+              radiusKm={radiusKm > 0 ? radiusKm : 0.05}
+              onPick={activeTab === 'map' ? handleMapPick : undefined}
+              className="border border-landrify-line shadow-sm"
             />
-            <div className="text-xs text-gray-500 px-1">
-              {tab === 'map'
-                ? 'Tap anywhere on the map to drop a pin.'
-                : 'The map updates automatically as you pick a location.'}
-            </div>
+            <p className="px-1 text-xs text-gray-500">
+              {activeTab === 'map'
+                ? 'Tap anywhere on the map to place the pin.'
+                : 'The map preview updates automatically as soon as the scan location changes.'}
+            </p>
           </div>
         </div>
 

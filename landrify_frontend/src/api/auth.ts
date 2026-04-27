@@ -16,7 +16,7 @@ export const loginWithGoogle = (credential: string) =>
   client
     .post<AuthResponse & { created?: boolean }>(
       '/api/v1/auth/google/',
-      { credential },
+      { id_token: credential },
       { headers: { 'X-Skip-Auth': 'true' } },
     )
     .then(r => r.data);

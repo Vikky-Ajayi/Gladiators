@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+*.pyc
 *.py[cod]
 *.pyo
 *.pyd
@@ -7,6 +8,7 @@ __pycache__/
 *.egg
 *.egg-info/
 dist/
+node_modules/
 build/
 .eggs/
 
@@ -29,6 +31,7 @@ venv/
 .venv/
 env/
 .env/
+/hlvenv
 
 # IDE
 .vscode/

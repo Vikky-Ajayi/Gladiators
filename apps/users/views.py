@@ -1,8 +1,10 @@
 import logging
+
+import requests
 from django.conf import settings
+from django.db import IntegrityError
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -16,6 +18,16 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
+GOOGLE_HTTP_SESSION = requests.Session()
+GOOGLE_HTTP_SESSION.trust_env = False
+
+
+def _build_auth_response(user: User, token: str) -> dict:
+    """Return the shared Knox auth payload used by register/login endpoints."""
+    return {
+        'user': UserProfileSerializer(user).data,
+        'token': token,
+    }
 
 
 class RegisterView(APIView):
@@ -28,21 +40,18 @@ class RegisterView(APIView):
         # Catch duplicate email cleanly (returns 400 not 500)
         try:
             user = serializer.save()
-        except Exception as e:
-            if 'unique' in str(e).lower() or 'duplicate' in str(e).lower() or 'already exists' in str(e).lower():
-                return Response(
-                    {'email': ['An account with this email already exists. Please login instead.']},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            raise
+        except IntegrityError as exc:
+            logger.warning("Registration failed due to duplicate email: %s", exc)
+            return Response(
+                {'email': ['An account with this email already exists. Please login instead.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         _, token = AuthToken.objects.create(user)
 
-        return Response({
-            'user': UserProfileSerializer(user).data,
-            'token': token,
-            'message': 'Account created successfully.'
-        }, status=status.HTTP_201_CREATED)
+        response_data = _build_auth_response(user, token)
+        response_data['message'] = 'Account created successfully.'
+        return Response(response_data, status=status.HTTP_201_CREATED)
 
 
 class LoginView(APIView):
@@ -55,10 +64,7 @@ class LoginView(APIView):
 
         _, token = AuthToken.objects.create(user)
 
-        return Response({
-            'user': UserProfileSerializer(user).data,
-            'token': token,
-        })
+        return Response(_build_auth_response(user, token))
 
 
 class GoogleAuthView(APIView):
@@ -91,16 +97,25 @@ class GoogleAuthView(APIView):
             )
 
         try:
-            from google.oauth2 import id_token as google_id_token
+            from google.auth.exceptions import GoogleAuthError
             from google.auth.transport import requests as google_requests
+            from google.oauth2 import id_token as google_id_token
+        except ImportError as exc:
+            logger.error("Google auth dependencies are unavailable: %s", exc)
+            return Response(
+                {'error': 'Google sign-in is temporarily unavailable.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        try:
             payload = google_id_token.verify_oauth2_token(
                 token_str,
-                google_requests.Request(),
+                google_requests.Request(session=GOOGLE_HTTP_SESSION),
                 client_id,
                 clock_skew_in_seconds=10,
             )
-        except Exception as e:
-            logger.warning(f"Google ID token verification failed: {e}")
+        except (ValueError, GoogleAuthError) as exc:
+            logger.warning("Google ID token verification failed: %s", exc)
             return Response(
                 {'error': 'Invalid Google credential.'},
                 status=status.HTTP_401_UNAUTHORIZED,
@@ -122,6 +137,7 @@ class GoogleAuthView(APIView):
                 email=email,
                 full_name=full_name,
                 user_type=User.UserType.INDIVIDUAL,
+                plan=User.Plan.BASIC,
             )
             user.set_unusable_password()
             user.save(update_fields=['password'])
@@ -131,12 +147,10 @@ class GoogleAuthView(APIView):
             user.save(update_fields=['full_name'])
 
         _, token = AuthToken.objects.create(user)
-        return Response({
-            'user': UserProfileSerializer(user).data,
-            'token': token,
-            'created': created,
-            'provider': 'google',
-        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+        return Response(
+            _build_auth_response(user, token),
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 
 
 class LogoutView(KnoxLogoutView):

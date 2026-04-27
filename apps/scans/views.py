@@ -1,17 +1,14 @@
 import logging
-import datetime
-from django.conf import settings
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.pagination import PageNumberPagination
 
-from .models import LandScan, SavedLand
+from .models import LandScan
 from .serializers import (
-    LandScanCreateSerializer, LandScanDetailSerializer,
-    LandScanListSerializer,
+    LandScanCreateSerializer,
+    LandScanDetailSerializer,
 )
 from .services import run_land_scan
 
@@ -51,8 +48,9 @@ class LandScanCreateView(APIView):
             user=user,
             latitude=data["latitude"],
             longitude=data["longitude"],
-            radius_km=data.get("radius_km", 0.5),
+            radius_km=data.get("radius_km", 0.05),
             accuracy_meters=data.get("accuracy"),
+            address_hint=data.get("address_hint", ""),
             address=data.get("address_hint", ""),
             scan_type="pro" if user.is_pro else "basic",
             payment_status="not_required",
@@ -65,8 +63,8 @@ class LandScanCreateView(APIView):
         # premium PDF features) but the on-screen AI report is always shown.
         try:
             run_land_scan(scan, full_report=True)
-        except Exception as e:
-            logger.error(f"Scan failed for {scan.scan_reference}: {e}")
+        except Exception as exc:
+            logger.exception("Scan failed for %s: %s", scan.scan_reference, exc)
             scan.status = "failed"
             scan.save(update_fields=["status"])
             return Response(
@@ -146,6 +144,7 @@ def _build_report(scan: LandScan) -> dict:
         "scan_reference":  scan.scan_reference,
         "generated_at":    timezone.now().isoformat(),
         "location": {
+            "address_hint": scan.address_hint,
             "address":     scan.address,
             "coordinates": {"latitude": str(scan.latitude), "longitude": str(scan.longitude)},
             "state":       scan.state, "lga": scan.lga,
@@ -187,6 +186,13 @@ def _build_report(scan: LandScan) -> dict:
             },
         },
         "elevation_meters":   str(scan.elevation_meters) if scan.elevation_meters else None,
+        "satellite_image_url": scan.satellite_image_url,
+        "weather": {
+            "current": scan.weather_current,
+            "historical": scan.weather_historical,
+            "projection": scan.weather_projection,
+            "summary": scan.weather_summary,
+        },
         "recommendations":    recommendations,
         "disclaimer": "This report is generated from available data and should not replace professional legal, survey, and engineering advice.",
     }
@@ -264,10 +270,6 @@ class SavedLandDetailView(APIView):
 
 
 # ─── Geocoding (forward, reverse) — proxied to Nominatim ─────────────────────
-
-from rest_framework.permissions import AllowAny
-
-
 class ForwardGeocodeView(APIView):
     """
     GET /api/v1/scans/geocode/?q=address
@@ -282,8 +284,13 @@ class ForwardGeocodeView(APIView):
         if len(q) < 3:
             return Response({'error': 'Query must be at least 3 characters.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        try:
+            limit = int(request.query_params.get('limit', 8))
+        except (TypeError, ValueError):
+            return Response({'error': 'limit must be an integer.'}, status=status.HTTP_400_BAD_REQUEST)
+
         from .services import forward_geocode
-        results = forward_geocode(q, limit=int(request.query_params.get('limit', 6)))
+        results = forward_geocode(q, limit=limit)
         return Response({'query': q, 'results': results})
 
 

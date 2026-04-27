@@ -321,7 +321,7 @@
         <div class="panel-header"><span class="dot"></span> Server</div>
         <div class="panel-body">
           <label>API Base URL</label>
-          <input type="text" id="apiBase" value="http://127.0.0.1:8000" />
+          <input type="text" id="apiBase" value="{{ api_base_url }}" />
         </div>
       </div>
 
@@ -390,7 +390,7 @@
       <div class="panel">
         <div class="panel-header"><span class="dot"></span> Request Log</div>
         <div class="log-panel" id="logPanel">
-          <div class="log-entry log-info">Ready. Server: http://localhost:8000</div>
+          <div class="log-entry log-info">Ready. Server: {{ api_base_url }}</div>
         </div>
       </div>
 

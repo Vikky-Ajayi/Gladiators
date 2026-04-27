@@ -78,7 +78,7 @@ export function ScansHistory() {
         </div>
       )}
 
-      {!isLoading && !error && data && data.length === 0 && (
+      {!isLoading && !error && data && (data.results ?? []).length === 0 && (
         <div className="rounded-3xl bg-white border border-landrify-line p-10 text-center">
           <p className="text-lg text-gray-700">No scans yet. Start your first scan.</p>
           <Link to="/scan/new" className="inline-block mt-4">
@@ -87,9 +87,9 @@ export function ScansHistory() {
         </div>
       )}
 
-      {!isLoading && !error && data && data.length > 0 && (
+      {!isLoading && !error && data && (data.results ?? []).length > 0 && (
         <div className="space-y-4">
-          {data.map((scan) => (
+          {(data.results ?? []).map((scan) => (
             <div key={scan.id} className="bg-white rounded-2xl border border-landrify-line p-6 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>

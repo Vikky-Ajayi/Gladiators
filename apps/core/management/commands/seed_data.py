@@ -22,6 +22,12 @@ from apps.core.management.commands._seed_massive import (
 from apps.core.management.commands._seed_extra import (
     EXTRA_FLOOD_ZONES, EXTRA_DAMS, EXTRA_ACQUISITIONS,
 )
+from apps.core.management.commands._seed_additions import (
+    ADDITIONAL_DAMS, ADDITIONAL_FLOOD_ZONES, ADDITIONAL_ACQUISITIONS,
+)
+from apps.core.management.commands._seed_additions2 import (
+    ADDITIONAL_DAMS2, ADDITIONAL_FLOOD_ZONES2, ADDITIONAL_ACQUISITIONS2,
+)
 
 FLOOD_ZONES = [
     {'zone_name':'Lekki-Victoria Island Coastal Flood Zone','risk_level':'very_high','state':'Lagos','lga':'Eti-Osa','min_lat':6.4200,'max_lat':6.5500,'min_lng':3.3800,'max_lng':3.7200,'flood_type':'coastal','peak_months':'June-October','data_source':'NIHSA AFO 2023 / Lagos State Ministry of Environment','last_major_flood_year':2022,'notes':'Low-lying coastal barrier island with average elevation of 2-4m. Highly susceptible to tidal surge, coastal flooding, and sea-level rise. Experienced severe flooding in 2012 (worst in 50 years). IPCC projects 3-4mm/year sea level rise in Gulf of Guinea. Entire Lekki Peninsula is at existential risk by 2050 under high-emission scenarios.'},
@@ -112,9 +118,27 @@ ACQUISITION_AREAS = [
 ]
 
 
-FLOOD_ZONES = FLOOD_ZONES + EXTRA_FLOOD_ZONES + MASSIVE_FLOOD_ZONES
-DAMS = DAMS + EXTRA_DAMS + MASSIVE_DAMS
-ACQUISITION_AREAS = ACQUISITION_AREAS + EXTRA_ACQUISITIONS + MASSIVE_ACQUISITIONS
+ALL_FLOOD_ZONES = (
+    FLOOD_ZONES
+    + MASSIVE_FLOOD_ZONES
+    + EXTRA_FLOOD_ZONES
+    + ADDITIONAL_FLOOD_ZONES
+    + ADDITIONAL_FLOOD_ZONES2
+)
+ALL_DAMS = (
+    DAMS
+    + MASSIVE_DAMS
+    + EXTRA_DAMS
+    + ADDITIONAL_DAMS
+    + ADDITIONAL_DAMS2
+)
+ALL_ACQUISITION_AREAS = (
+    ACQUISITION_AREAS
+    + MASSIVE_ACQUISITIONS
+    + EXTRA_ACQUISITIONS
+    + ADDITIONAL_ACQUISITIONS
+    + ADDITIONAL_ACQUISITIONS2
+)
 
 
 class Command(BaseCommand):
@@ -123,47 +147,61 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('--dry-run', action='store_true', help='Preview counts without writing')
 
+    @staticmethod
+    def _unique_count(items, keys):
+        return len({tuple(item.get(key) for key in keys) for item in items})
+
     def handle(self, *args, **options):
         dry = options.get('dry_run', False)
-        self.stdout.write('\n══════════════════════════════════════════')
-        self.stdout.write('  Landrify — Seeding Nigerian Land Risk Data')
-        self.stdout.write('══════════════════════════════════════════\n')
+        flood_count = self._unique_count(ALL_FLOOD_ZONES, ('zone_name', 'state', 'lga'))
+        dam_count = self._unique_count(ALL_DAMS, ('name', 'state'))
+        acquisition_count = self._unique_count(ALL_ACQUISITION_AREAS, ('area_name', 'state', 'lga'))
+
+        self.stdout.write('\n==========================================')
+        self.stdout.write('  Landrify - Seeding Nigerian Land Risk Data')
+        self.stdout.write('==========================================\n')
         if dry:
-            self.stdout.write(self.style.WARNING('DRY RUN — no data will be written\n'))
+            self.stdout.write(self.style.WARNING('DRY RUN - no data will be written\n'))
 
         if not dry:
-            for d in FLOOD_ZONES:
+            for record in ALL_FLOOD_ZONES:
                 lookup = {
-                    'zone_name': d['zone_name'],
-                    'state': d['state'],
-                    'lga': d.get('lga', ''),
+                    'zone_name': record['zone_name'],
+                    'state': record['state'],
+                    'lga': record.get('lga', ''),
                 }
-                defaults = {k: v for k, v in d.items() if k not in lookup}
+                defaults = {key: value for key, value in record.items() if key not in lookup}
                 FloodRiskZone.objects.update_or_create(**lookup, defaults=defaults)
-        self.stdout.write(self.style.SUCCESS(f'{"[DRY RUN]" if dry else "✓"} {len(FLOOD_ZONES)} flood risk zones'))
+        self.stdout.write(self.style.SUCCESS(
+            f'{"[DRY RUN]" if dry else "[OK]"} {flood_count} flood risk zones'
+        ))
 
         if not dry:
-            for d in DAMS:
+            for record in ALL_DAMS:
                 lookup = {
-                    'name': d['name'],
-                    'state': d.get('state', ''),
+                    'name': record['name'],
+                    'state': record.get('state', ''),
                 }
-                defaults = {k: v for k, v in d.items() if k not in lookup}
+                defaults = {key: value for key, value in record.items() if key not in lookup}
                 Dam.objects.update_or_create(**lookup, defaults=defaults)
-        self.stdout.write(self.style.SUCCESS(f'{"[DRY RUN]" if dry else "✓"} {len(DAMS)} dams'))
+        self.stdout.write(self.style.SUCCESS(
+            f'{"[DRY RUN]" if dry else "[OK]"} {dam_count} dams'
+        ))
 
         if not dry:
-            for d in ACQUISITION_AREAS:
+            for record in ALL_ACQUISITION_AREAS:
                 lookup = {
-                    'area_name': d['area_name'],
-                    'state': d['state'],
-                    'lga': d.get('lga', ''),
+                    'area_name': record['area_name'],
+                    'state': record['state'],
+                    'lga': record.get('lga', ''),
                 }
-                defaults = {k: v for k, v in d.items() if k not in lookup}
+                defaults = {key: value for key, value in record.items() if key not in lookup}
                 AcquisitionArea.objects.update_or_create(**lookup, defaults=defaults)
-        self.stdout.write(self.style.SUCCESS(f'{"[DRY RUN]" if dry else "✓"} {len(ACQUISITION_AREAS)} acquisition areas'))
+        self.stdout.write(self.style.SUCCESS(
+            f'{"[DRY RUN]" if dry else "[OK]"} {acquisition_count} acquisition areas'
+        ))
 
         self.stdout.write(self.style.SUCCESS(
-            f'\n{"✅ Seed complete" if not dry else "[DRY RUN] Preview"} — '
-            f'{len(FLOOD_ZONES)} zones | {len(DAMS)} dams | {len(ACQUISITION_AREAS)} areas\n'
+            f'\n{"Seed complete" if not dry else "[DRY RUN] Preview"} - '
+            f'{flood_count} zones | {dam_count} dams | {acquisition_count} areas\n'
         ))

@@ -1,35 +1,27 @@
-import type { ScanResult } from '../types/api';
+import type { ScanResult, WeatherBundle } from '../types/api';
 
-// ── Brand palette ────────────────────────────────────────────────────────────
+const PAGE = { width: 210, height: 297, marginX: 18, marginTop: 22, marginBottom: 18 };
 const BRAND = {
-  green:      [26, 122, 74] as [number, number, number],
-  greenDark:  [16, 80, 48] as [number, number, number],
-  ink:        [17, 24, 39] as [number, number, number],
-  body:       [55, 65, 81] as [number, number, number],
-  muted:      [107, 114, 128] as [number, number, number],
-  light:      [243, 244, 246] as [number, number, number],
-  paper:      [250, 250, 250] as [number, number, number],
-  border:     [229, 231, 235] as [number, number, number],
+  green: [26, 122, 74] as [number, number, number],
+  ink: [17, 24, 39] as [number, number, number],
+  body: [55, 65, 81] as [number, number, number],
+  muted: [107, 114, 128] as [number, number, number],
+  light: [243, 244, 246] as [number, number, number],
+  border: [229, 231, 235] as [number, number, number],
 };
 
-const RISK: Record<string, { fill: [number, number, number]; ink: [number, number, number]; label: string }> = {
-  low:      { fill: [220, 252, 231], ink: [22, 101, 52],  label: 'LOW RISK' },
-  medium:   { fill: [254, 243, 199], ink: [146, 64, 14],  label: 'MEDIUM RISK' },
-  high:     { fill: [255, 237, 213], ink: [154, 52, 18],  label: 'HIGH RISK' },
-  critical: { fill: [254, 226, 226], ink: [153, 27, 27],  label: 'CRITICAL RISK' },
-  unknown:  { fill: [243, 244, 246], ink: [55, 65, 81],   label: 'RISK UNKNOWN' },
-};
-
-const PAGE = { w: 210, h: 297, mx: 18 };
-
-const fmtDate = (v?: string) =>
+const fmtDate = (value?: string) =>
   new Intl.DateTimeFormat('en-GB', {
-    day: '2-digit', month: 'short', year: 'numeric',
-    hour: 'numeric', minute: '2-digit', hour12: true,
-  }).format(v ? new Date(v) : new Date());
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(value ? new Date(value) : new Date());
 
-const stripMd = (t: string) =>
-  t
+const stripMarkdown = (value: string) =>
+  value
     .replace(/```[\s\S]*?```/g, '')
     .replace(/`([^`]+)`/g, '$1')
     .replace(/^#+\s+/gm, '')
@@ -37,331 +29,293 @@ const stripMd = (t: string) =>
     .replace(/\*([^*]+)\*/g, '$1')
     .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
     .replace(/^>\s?/gm, '')
-    .replace(/^[-*]\s/gm, '• ')
+    .replace(/^\d+\.\s+/gm, '- ')
     .trim();
 
-// ── Drawing helpers ──────────────────────────────────────────────────────────
-const setFill = (doc: any, c: [number, number, number]) => doc.setFillColor(c[0], c[1], c[2]);
-const setText = (doc: any, c: [number, number, number]) => doc.setTextColor(c[0], c[1], c[2]);
-const setDraw = (doc: any, c: [number, number, number]) => doc.setDrawColor(c[0], c[1], c[2]);
+const scanWeather = (scan: ScanResult): WeatherBundle =>
+  scan.weather ?? {
+    current: scan.weather_current ?? null,
+    historical: scan.weather_historical ?? null,
+    projection: scan.weather_projection ?? null,
+    summary: scan.weather_summary ?? '',
+  };
 
-function drawHeader(doc: any, pageNo: number, total: number, scanRef: string) {
+function setFill(doc: any, color: [number, number, number]) {
+  doc.setFillColor(color[0], color[1], color[2]);
+}
+
+function setText(doc: any, color: [number, number, number]) {
+  doc.setTextColor(color[0], color[1], color[2]);
+}
+
+function setDraw(doc: any, color: [number, number, number]) {
+  doc.setDrawColor(color[0], color[1], color[2]);
+}
+
+function drawHeader(doc: any, pageNo: number, totalPages: number, scanRef: string) {
   setFill(doc, BRAND.green);
-  doc.rect(0, 0, PAGE.w, 14, 'F');
+  doc.rect(0, 0, PAGE.width, 14, 'F');
   setText(doc, [255, 255, 255]);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
-  doc.text('LANDRIFY', PAGE.mx, 9);
+  doc.text('LANDRIFY', PAGE.marginX, 9);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
-  doc.text('Land Verification Report', PAGE.mx + 28, 9);
-  doc.text(scanRef, PAGE.w - PAGE.mx, 9, { align: 'right' });
+  doc.text(scanRef, PAGE.width - PAGE.marginX, 9, { align: 'right' });
 
   setText(doc, BRAND.muted);
   doc.setFontSize(8);
-  doc.text(`Page ${pageNo} of ${total}`, PAGE.w / 2, PAGE.h - 8, { align: 'center' });
-  doc.text('landrify.app  ·  Verified land insights for Nigeria', PAGE.mx, PAGE.h - 8);
-  doc.text(fmtDate(), PAGE.w - PAGE.mx, PAGE.h - 8, { align: 'right' });
+  doc.text(`Page ${pageNo} of ${totalPages}`, PAGE.width / 2, PAGE.height - 8, { align: 'center' });
 }
 
-function watermark(doc: any) {
-  doc.saveGraphicsState();
-  // jsPDF GState for opacity
-  const gs = (doc.GState && new doc.GState({ opacity: 0.04 })) || null;
-  if (gs) doc.setGState(gs);
+function drawSectionTitle(doc: any, title: string, y: number) {
   setText(doc, BRAND.green);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(80);
-  doc.text('LANDRIFY', PAGE.w / 2, PAGE.h / 2 + 20, { align: 'center', angle: 30 });
-  doc.restoreGraphicsState();
-  setText(doc, BRAND.ink);
-}
-
-function sectionTitle(doc: any, label: string, y: number) {
-  setText(doc, BRAND.greenDark);
-  doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
-  doc.text(label.toUpperCase(), PAGE.mx, y);
+  doc.text(title.toUpperCase(), PAGE.marginX, y);
   setDraw(doc, BRAND.green);
   doc.setLineWidth(0.6);
-  doc.line(PAGE.mx, y + 1.8, PAGE.mx + 24, y + 1.8);
+  doc.line(PAGE.marginX, y + 2, PAGE.marginX + 28, y + 2);
   setText(doc, BRAND.ink);
 }
 
-function kvRow(doc: any, label: string, value: string, y: number, opts: { valueColor?: [number, number, number] } = {}) {
-  setText(doc, BRAND.muted);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.text(label.toUpperCase(), PAGE.mx, y);
-  setText(doc, opts.valueColor || BRAND.ink);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
-  const wrapped: string[] = doc.splitTextToSize(value || '—', 110);
-  doc.text(wrapped, PAGE.mx + 60, y);
-  return y + 5 + (wrapped.length - 1) * 4.5;
-}
-
-function panel(doc: any, x: number, y: number, w: number, h: number, fill: [number, number, number], radius = 4) {
-  setFill(doc, fill);
+function drawCard(doc: any, x: number, y: number, width: number, height: number) {
+  setFill(doc, BRAND.light);
   setDraw(doc, BRAND.border);
   doc.setLineWidth(0.2);
-  doc.roundedRect(x, y, w, h, radius, radius, 'FD');
+  doc.roundedRect(x, y, width, height, 4, 4, 'FD');
 }
 
-function pill(doc: any, x: number, y: number, label: string, fill: [number, number, number], textColor: [number, number, number]) {
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
-  const padX = 4;
-  const w = doc.getTextWidth(label) + padX * 2;
-  setFill(doc, fill);
-  doc.roundedRect(x, y - 4, w, 6.5, 3, 3, 'F');
-  setText(doc, textColor);
-  doc.text(label, x + padX, y);
-  setText(doc, BRAND.ink);
-  return x + w;
+function addWrappedBlock(doc: any, text: string, cursor: number, fontSize = 10.5) {
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(fontSize);
+  setText(doc, BRAND.body);
+  const lines: string[] = doc.splitTextToSize(text || '—', PAGE.width - PAGE.marginX * 2);
+  doc.text(lines, PAGE.marginX, cursor);
+  return cursor + lines.length * (fontSize === 10.5 ? 5.6 : 4.8);
 }
 
-// ── Page builders ────────────────────────────────────────────────────────────
+function addKvRows(doc: any, rows: Array<[string, string]>, startY: number) {
+  let cursor = startY;
+  rows.forEach(([label, value]) => {
+    setText(doc, BRAND.muted);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.text(label.toUpperCase(), PAGE.marginX + 4, cursor);
+
+    setText(doc, BRAND.ink);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    const lines: string[] = doc.splitTextToSize(value || '—', PAGE.width - PAGE.marginX * 2 - 62);
+    doc.text(lines, PAGE.marginX + 56, cursor);
+    cursor += Math.max(7, lines.length * 4.8 + 1.5);
+  });
+  return cursor;
+}
 
 function coverPage(doc: any, scan: ScanResult) {
-  // Big green block
   setFill(doc, BRAND.green);
-  doc.rect(0, 0, PAGE.w, 110, 'F');
-
-  // Decorative circle
-  setFill(doc, BRAND.greenDark);
-  doc.circle(PAGE.w - 30, 40, 60, 'F');
+  doc.rect(0, 0, PAGE.width, 100, 'F');
 
   setText(doc, [255, 255, 255]);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.text('LANDRIFY', PAGE.mx, 24);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.text('Land verification & risk intelligence', PAGE.mx, 30);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(11);
-  doc.text(scan.scan_type === 'pro' ? 'PRO REPORT' : 'BASIC REPORT', PAGE.mx, 50);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(28);
-  const title = doc.splitTextToSize('Land Verification\nReport', 130);
-  doc.text(title, PAGE.mx, 65);
-
+  doc.setFontSize(12);
+  doc.text('LANDRIFY', PAGE.marginX, 24);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
-  doc.text(scan.address || `${scan.lga}, ${scan.state}`, PAGE.mx, 95);
-
-  // Risk panel below the green hero
-  const risk = RISK[(scan.risk_level || 'unknown').toLowerCase()] || RISK.unknown;
-  panel(doc, PAGE.mx, 125, PAGE.w - PAGE.mx * 2, 60, risk.fill, 6);
-  setText(doc, risk.ink);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.text('OVERALL ASSESSMENT', PAGE.mx + 8, 135);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(28);
-  doc.text(risk.label, PAGE.mx + 8, 152);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(11);
-  doc.text(`Risk score: ${scan.risk_score ?? '—'} / 100`, PAGE.mx + 8, 162);
-  doc.text(`Land area scanned: ${scan.radius_km} km radius`, PAGE.mx + 8, 168);
-  doc.text(`Plan: ${scan.scan_type === 'pro' ? 'Pro · AI projection included' : 'Basic'}`, PAGE.mx + 8, 174);
-
-  // Meta block
-  setText(doc, BRAND.body);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.text('REPORT REFERENCE', PAGE.mx, 200);
-  doc.text('GENERATED ON', PAGE.mx + 95, 200);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(11);
-  setText(doc, BRAND.ink);
-  doc.text(scan.scan_reference || '—', PAGE.mx, 207);
-  doc.text(fmtDate(scan.created_at), PAGE.mx + 95, 207);
+  doc.text('Land Verification Report', PAGE.marginX, 31);
 
   doc.setFont('helvetica', 'bold');
-  setText(doc, BRAND.body);
-  doc.setFontSize(9);
-  doc.text('COORDINATES', PAGE.mx, 220);
-  doc.text('ELEVATION', PAGE.mx + 95, 220);
+  doc.setFontSize(27);
+  doc.text('Land Risk Report', PAGE.marginX, 58);
+
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(11);
-  setText(doc, BRAND.ink);
-  doc.text(`${scan.latitude}, ${scan.longitude}`, PAGE.mx, 227);
-  doc.text(`${scan.elevation_meters ?? '—'} m`, PAGE.mx + 95, 227);
+  doc.text(scan.address || scan.address_hint || `${scan.lga}, ${scan.state}`, PAGE.marginX, 72);
 
-  // Footer note
-  setFill(doc, BRAND.light);
-  doc.rect(0, 260, PAGE.w, 25, 'F');
-  setText(doc, BRAND.muted);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  const disclaimer = 'This report compiles data from satellite imagery, government gazettes, NIHSA flood outlooks and AI analysis. Use it alongside professional legal and survey advice before any land transaction.';
-  const lines: string[] = doc.splitTextToSize(disclaimer, PAGE.w - PAGE.mx * 2);
-  doc.text(lines, PAGE.mx, 270);
+  drawCard(doc, PAGE.marginX, 120, PAGE.width - PAGE.marginX * 2, 78);
+  let cursor = 132;
+  cursor = addKvRows(
+    doc,
+    [
+      ['Scan Reference', scan.scan_reference || '—'],
+      ['Generated On', fmtDate(scan.created_at)],
+      ['Coordinates', `${scan.latitude}, ${scan.longitude}`],
+      ['Radius', `${scan.radius_km} km`],
+      ['Risk Score', `${scan.risk_score ?? '—'} / 100 (${scan.risk_level ?? 'unknown'})`],
+      ['Elevation', `${scan.elevation_meters ?? '—'} m above sea level`],
+    ],
+    cursor,
+  );
+
+  drawSectionTitle(doc, 'Summary', cursor + 10);
+  addWrappedBlock(
+    doc,
+    scan.ai_report?.trim()
+      ? stripMarkdown(scan.ai_report).split('\n').slice(0, 6).join(' ')
+      : 'This report summarises legal, environmental, weather, and AI-derived land-risk insights for the selected location.',
+    cursor + 20,
+  );
 }
 
 function detailsPage(doc: any, scan: ScanResult) {
   doc.addPage();
-  watermark(doc);
+  let cursor = 30;
+  drawSectionTitle(doc, 'Location & Legal Status', cursor);
+  cursor += 10;
 
-  let y = 30;
-  sectionTitle(doc, 'Location & Land', y); y += 10;
+  drawCard(doc, PAGE.marginX, cursor, PAGE.width - PAGE.marginX * 2, 92);
+  cursor = addKvRows(
+    doc,
+    [
+      ['Address', scan.address || '—'],
+      ['Plot Description', scan.address_hint || '—'],
+      ['State', scan.state || '—'],
+      ['LGA', scan.lga || '—'],
+      ['Government Acquisition', scan.legal_status.is_government_land ? 'Yes' : 'No'],
+      ['Under Acquisition', scan.legal_status.is_under_acquisition ? 'Yes' : 'No'],
+      ['Authority', scan.legal_status.authority || '—'],
+      ['Gazette Reference', scan.legal_status.gazette_reference || '—'],
+    ],
+    cursor + 12,
+  );
 
-  panel(doc, PAGE.mx, y, PAGE.w - PAGE.mx * 2, 56, BRAND.paper);
-  let yy = y + 8;
-  yy = kvRow(doc, 'Address', scan.address || '—', yy);
-  yy = kvRow(doc, 'State', scan.state || '—', yy);
-  yy = kvRow(doc, 'LGA', scan.lga || '—', yy);
-  yy = kvRow(doc, 'Coordinates', `${scan.latitude}, ${scan.longitude}`, yy);
-  yy = kvRow(doc, 'Radius scanned', `${scan.radius_km} km`, yy);
-  yy = kvRow(doc, 'Elevation', `${scan.elevation_meters ?? '—'} m above sea level`, yy);
-
-  y += 64;
-  sectionTitle(doc, 'Legal Status', y); y += 10;
-  const ls = scan.legal_status || ({} as any);
-  const govFlagBad = !!ls.is_government_land || !!ls.is_under_acquisition;
-  panel(doc, PAGE.mx, y, PAGE.w - PAGE.mx * 2, 60, govFlagBad ? RISK.critical.fill : RISK.low.fill);
-
-  let lx = PAGE.mx + 6;
-  pill(doc, lx, y + 8,
-    ls.is_government_land ? 'Government acquisition' : 'No government claim',
-    ls.is_government_land ? RISK.critical.ink : RISK.low.ink, [255, 255, 255]);
-  pill(doc, lx + 60, y + 8,
-    ls.is_under_acquisition ? 'Under acquisition' : 'Not under acquisition',
-    ls.is_under_acquisition ? RISK.critical.ink : RISK.low.ink, [255, 255, 255]);
-
-  yy = y + 22;
-  yy = kvRow(doc, 'Authority', ls.authority || '—', yy);
-  yy = kvRow(doc, 'Gazette ref.', ls.gazette_reference || '—', yy);
-
-  setText(doc, BRAND.body);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.text('NOTES', PAGE.mx, yy + 2);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  setText(doc, BRAND.ink);
-  const notes: string[] = doc.splitTextToSize(ls.notes || '—', PAGE.w - PAGE.mx * 2 - 4);
-  doc.text(notes, PAGE.mx, yy + 8);
+  drawSectionTitle(doc, 'Legal Notes', cursor + 10);
+  addWrappedBlock(doc, scan.legal_status.notes || 'No additional legal notes.', cursor + 20);
 }
 
-function envPage(doc: any, scan: ScanResult) {
+function environmentalPage(doc: any, scan: ScanResult) {
   doc.addPage();
-  watermark(doc);
-  let y = 30;
-  sectionTitle(doc, 'Environmental Risks', y); y += 10;
+  let cursor = 30;
+  drawSectionTitle(doc, 'Environmental Risks', cursor);
+  cursor += 10;
 
-  const env = scan.environmental_risks || ({} as any);
+  drawCard(doc, PAGE.marginX, cursor, PAGE.width - PAGE.marginX * 2, 82);
+  addKvRows(
+    doc,
+    [
+      ['Flood Risk', `${scan.environmental_risks.flood.risk_level || 'unknown'} — ${scan.environmental_risks.flood.zone_name || 'No mapped zone'}`],
+      ['Flood Data Source', scan.environmental_risks.flood.data_source || '—'],
+      ['Erosion Risk', scan.environmental_risks.erosion.risk_level || 'unknown'],
+      ['Nearest Dam', scan.environmental_risks.dam_proximity.nearest_dam || '—'],
+      ['Dam Distance', `${scan.environmental_risks.dam_proximity.distance_km ?? '—'} km`],
+      ['Dam Risk', scan.environmental_risks.dam_proximity.risk_level || 'unknown'],
+      ['Satellite Preview', scan.satellite_image_url ? 'Available in app view' : 'Unavailable'],
+    ],
+    cursor + 12,
+  );
+}
 
-  const cardW = (PAGE.w - PAGE.mx * 2 - 8) / 3;
-  const cards = [
-    { name: 'Flood',   level: env.flood?.risk_level,         meta: env.flood?.zone_name || '—' },
-    { name: 'Erosion', level: env.erosion?.risk_level,       meta: '—' },
-    { name: 'Dam',     level: env.dam_proximity?.risk_level, meta: env.dam_proximity?.nearest_dam || '—' },
-  ];
-  cards.forEach((c, i) => {
-    const r = RISK[(c.level || 'unknown').toLowerCase()] || RISK.unknown;
-    const x = PAGE.mx + (cardW + 4) * i;
-    panel(doc, x, y, cardW, 50, r.fill, 6);
-    setText(doc, r.ink);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.text(c.name.toUpperCase(), x + 6, y + 10);
-    doc.setFontSize(20);
-    doc.text((c.level || '—').toUpperCase(), x + 6, y + 26);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8.5);
-    const meta: string[] = doc.splitTextToSize(c.meta, cardW - 12);
-    doc.text(meta, x + 6, y + 36);
-  });
+function weatherPage(doc: any, scan: ScanResult) {
+  const weather = scanWeather(scan);
+  if (!weather.current && !weather.historical && !weather.projection) return;
 
-  y += 60;
+  doc.addPage();
+  let cursor = 30;
+  drawSectionTitle(doc, 'Weather & Climate', cursor);
+  cursor += 10;
 
-  panel(doc, PAGE.mx, y, PAGE.w - PAGE.mx * 2, 70, BRAND.paper);
-  let yy = y + 8;
-  yy = kvRow(doc, 'Flood zone',     env.flood?.zone_name || '—', yy);
-  yy = kvRow(doc, 'Flood source',   env.flood?.data_source || '—', yy);
-  yy = kvRow(doc, 'Nearest dam',    env.dam_proximity?.nearest_dam || '—', yy);
-  yy = kvRow(doc, 'Distance to dam',`${env.dam_proximity?.distance_km ?? '—'} km`, yy);
+  drawCard(doc, PAGE.marginX, cursor, PAGE.width - PAGE.marginX * 2, 76);
+  cursor = addKvRows(
+    doc,
+    [
+      ['Current Temperature', `${weather.current?.temperature_c ?? '—'} °C`],
+      ['Humidity', `${weather.current?.humidity_percent ?? '—'} %`],
+      ['Precipitation', `${weather.current?.precipitation_mm ?? '—'} mm`],
+      ['Wind Speed', `${weather.current?.wind_speed_kmh ?? '—'} km/h`],
+      ['Conditions', weather.current?.description || '—'],
+      ['Avg Annual Rainfall', `${weather.historical?.avg_annual_rainfall_mm ?? '—'} mm/year`],
+      ['Rainfall Trend', weather.historical?.rainfall_trend || '—'],
+      ['Avg Max Temperature', `${weather.historical?.avg_max_temp_c ?? '—'} °C`],
+      ['Extreme Rain Days/Year', `${weather.historical?.extreme_rain_days_per_year ?? '—'}`],
+    ],
+    cursor + 12,
+  );
+
+  drawSectionTitle(doc, 'Climate Projections', cursor + 10);
+  cursor += 20;
+  drawCard(doc, PAGE.marginX, cursor, PAGE.width - PAGE.marginX * 2, 82);
+  cursor = addKvRows(
+    doc,
+    [
+      ['2030', `${weather.projection?.projection_2030?.avg_annual_rainfall_mm ?? '—'} mm/year · ${weather.projection?.projection_2030?.avg_max_temp_c ?? '—'} °C`],
+      ['2035', `${weather.projection?.projection_2035?.avg_annual_rainfall_mm ?? '—'} mm/year · ${weather.projection?.projection_2035?.avg_max_temp_c ?? '—'} °C`],
+      ['2040', `${weather.projection?.projection_2040?.avg_annual_rainfall_mm ?? '—'} mm/year · ${weather.projection?.projection_2040?.avg_max_temp_c ?? '—'} °C`],
+      ['2050', `${weather.projection?.projection_2050?.avg_annual_rainfall_mm ?? '—'} mm/year · ${weather.projection?.projection_2050?.avg_max_temp_c ?? '—'} °C`],
+      ['Rainfall Change to 2050', `${weather.projection?.rainfall_change_2025_to_2050_percent ?? '—'} %`],
+      ['Flood Trajectory', weather.projection?.flood_risk_trajectory || '—'],
+    ],
+    cursor + 12,
+  );
+
+  if (weather.summary) {
+    doc.addPage();
+    cursor = 30;
+    drawSectionTitle(doc, 'Weather Summary', cursor);
+    addWrappedBlock(doc, weather.summary, cursor + 12);
+  }
 }
 
 function aiPage(doc: any, scan: ScanResult) {
   if (!scan.ai_report?.trim()) return;
-  doc.addPage();
-  watermark(doc);
-  let y = 30;
-  sectionTitle(doc, 'AI 50-Year Time Projection', y); y += 10;
 
-  panel(doc, PAGE.mx, y, PAGE.w - PAGE.mx * 2, 14, BRAND.light, 4);
+  doc.addPage();
+  let cursor = 30;
+  drawSectionTitle(doc, 'AI Report', cursor);
+  cursor += 12;
+
+  const info = `Model: ${scan.ai_report_model || '—'} · Tokens used: ${scan.ai_report_tokens ?? '—'}`;
   setText(doc, BRAND.muted);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.text(`Model: ${scan.ai_report_model || '—'}    Tokens: ${scan.ai_report_tokens ?? '—'}`, PAGE.mx + 4, y + 9);
-  y += 22;
+  doc.text(info, PAGE.marginX, cursor);
+  cursor += 10;
 
   setText(doc, BRAND.body);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10.5);
-  const cleaned = stripMd(scan.ai_report);
-  const lines: string[] = doc.splitTextToSize(cleaned, PAGE.w - PAGE.mx * 2);
-  let cursor = y;
-  const max = PAGE.h - 22;
-  lines.forEach((ln) => {
-    if (cursor > max) {
+  const lines: string[] = doc.splitTextToSize(stripMarkdown(scan.ai_report), PAGE.width - PAGE.marginX * 2);
+
+  for (const line of lines) {
+    if (cursor > PAGE.height - PAGE.marginBottom) {
       doc.addPage();
-      watermark(doc);
-      cursor = 28;
+      cursor = 24;
     }
-    doc.text(ln, PAGE.mx, cursor);
+    doc.text(line, PAGE.marginX, cursor);
     cursor += 5.6;
-  });
+  }
 }
 
 function disclaimerPage(doc: any) {
   doc.addPage();
-  watermark(doc);
-  let y = 30;
-  sectionTitle(doc, 'Disclaimer & Sources', y); y += 12;
-  setText(doc, BRAND.body);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10.5);
-  const text = [
-    'This report is generated from publicly available data sources and AI analysis. It is intended as a guide only and does not replace professional legal, survey or engineering advice. Always conduct independent due diligence before any land transaction.',
-    '',
-    'Data sources include: NIHSA Annual Flood Outlooks 2021–2024, NEMA, OCHA Nigeria, UNDP, Lagos State Ministry of Lands / LASURA, FCDA / AGIS, OpenStreetMap and satellite imagery providers.',
-    '',
-    'Generated by Landrify — landrify.app',
-  ].join('\n');
-  const lines: string[] = doc.splitTextToSize(text, PAGE.w - PAGE.mx * 2);
-  doc.text(lines, PAGE.mx, y);
+  let cursor = 30;
+  drawSectionTitle(doc, 'Disclaimer', cursor);
+  cursor += 12;
+
+  const disclaimer = [
+    'This report is generated from environmental data and AI analysis.',
+    'It does not constitute legal or engineering advice.',
+    'Independent professional verification is strongly recommended before any land transaction.',
+  ].join(' ');
+
+  addWrappedBlock(doc, disclaimer, cursor);
 }
 
-// ── Public ───────────────────────────────────────────────────────────────────
-
 export async function downloadScanPdf(scan: ScanResult) {
-  const dynamicImport = new Function('u', 'return import(u)') as (u: string) => Promise<any>;
-  const { jsPDF } = await dynamicImport('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/+esm');
+  const { jsPDF } = await import('jspdf');
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
 
   coverPage(doc, scan);
   detailsPage(doc, scan);
-  envPage(doc, scan);
+  environmentalPage(doc, scan);
+  weatherPage(doc, scan);
   aiPage(doc, scan);
   disclaimerPage(doc);
 
-  const total = doc.getNumberOfPages();
-  for (let i = 1; i <= total; i++) {
-    doc.setPage(i);
-    if (i > 1) drawHeader(doc, i, total, scan.scan_reference || '—');
-    else {
-      // Cover footer only
-      setText(doc, BRAND.muted);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.text(`Page ${i} of ${total}`, PAGE.w / 2, PAGE.h - 8, { align: 'center' });
-    }
+  const totalPages = doc.getNumberOfPages();
+  for (let pageNo = 1; pageNo <= totalPages; pageNo += 1) {
+    doc.setPage(pageNo);
+    drawHeader(doc, pageNo, totalPages, scan.scan_reference || scan.id);
   }
 
   doc.save(`Landrify-Report-${scan.scan_reference || scan.id}.pdf`);

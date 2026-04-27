@@ -1,359 +1,249 @@
-"""
-Landrify AI Analysis Engine
-----------------------------
-Uses Groq (llama-3.3-70b-versatile) to turn every signal we have collected
-about a parcel — flood zones, dam capacity, elevation, legal status, regional
-context — into a long-form, time-projected risk report (now ~12 sections).
+"""Groq-backed AI reporting for Landrify scan results."""
 
-This is the core differentiator of Landrify.
-"""
+from __future__ import annotations
+
 import logging
-from groq import Groq
+
 from django.conf import settings
+from groq import Groq
 
 logger = logging.getLogger(__name__)
 
-
-# ── Regional context table ────────────────────────────────────────────────────
-# Carefully curated per-state qualitative context that the LLM uses to ground
-# projections. Sourced from NIHSA AFOs, NEMA bulletins, NEWMAP reports,
-# CBN inflation series, World Bank Nigeria Economic Updates and Lagos / FCT
-# master plans. Keep concise — the model does the writing.
-
-NIGERIA_REGIONS = {
-    # South West
-    'Lagos':     'Coastal megacity, sea-level rise + sand mining + tidal flooding; land prices grow ~12-18%/yr in priced corridors (Lekki, VI, Ikoyi). LASURA Building Control Agency active.',
-    'Ogun':      'Lagos overflow corridor; Ogun River basin floods; rapid industrial estates (Sagamu, Agbara). Oyan Dam releases compound flood risk.',
-    'Oyo':       'Inland Yoruba heartland; Asejire/Eleyele dams; gully erosion belt around Ibadan; relatively stable land tenure.',
-    'Osun':      'Inland; Osun River basin; mining-related land contests in Ilesa/Ife axis.',
-    'Ondo':      'Mixed coastal-inland; bitumen belt; Owena Dam; coastal communities (Ilaje) under tidal stress.',
-    'Ekiti':     'Highland inland; lower flood exposure; severe rural-urban migration shrinking some land values.',
-
-    # South South / Niger Delta
-    'Rivers':    'Niger Delta tidal floodplain; oil & gas concession overlap; subsidence ~25mm/yr; Bonny LNG zone restricts private titles.',
-    'Bayelsa':   'Almost entirely <5m elevation; >70% perennial flood risk; oil acquisition zones widespread.',
-    'Delta':     'Niger River terminus; Warri petroleum zone; Lagdo + Kainji + Jebba release impact zone.',
-    'Akwa Ibom': 'Coastal; ExxonMobil Qua Iboe corridor; rising oil-driven land prices in Uyo & Eket.',
-    'Cross River': 'Coastal + tropical rainforest; Calabar port zone; Obudu mountains lower flood risk inland.',
-    'Edo':       'Forest belt + Benin City urban core; gully erosion in Auchi/Igarra; Ovia rainforest reserve restricts titles.',
-
-    # South East
-    'Anambra':   'Severe gully erosion belt (Nanka, Agulu, Oko); Niger River floodplain along Onitsha/Ogbaru; NEWMAP active.',
-    'Enugu':     'Coal-belt geology; gully erosion; cooler highland climate moderates flooding.',
-    'Imo':       'Gully erosion + petroleum prospecting; Owerri urban expansion fast.',
-    'Ebonyi':    'Lead/zinc mining zones; gully erosion; agrarian.',
-    'Abia':      'Aba commercial corridor; gully erosion belt; Aba Free Trade Zone restricts private titles.',
-
-    # North Central / FCT
-    'FCT':       'Federal land — ALL land owned by FG under Decree No. 6 of 1976. Only allocated, never sold. AGIS title essential.',
-    'Niger':     'Hosts Kainji, Jebba, Shiroro, Zungeru dams — most concentrated dam footprint in Nigeria; high flood pulse risk.',
-    'Kogi':      'Niger-Benue confluence at Lokoja — annual perennial flood; Lagdo Dam direct impact zone.',
-    'Benue':     'Benue River basin; direct downstream impact of Lagdo Dam (Cameroon); 2022 floods displaced 200,000+.',
-    'Plateau':   'Highland (~1,200m); cooler; tin mining ponds; communal land conflicts in Jos/Barkin Ladi.',
-    'Nasarawa':  'Abuja overflow corridor; Karu/Mararaba growing fast; Benue floodplain east.',
-    'Kwara':     'Niger River basin; Jebba Dam; agricultural land plentiful.',
-
-    # North West
-    'Kano':      'Sahel margin; Tiga + Challawa Gorge dams; severe heat stress projected; arable land pressure.',
-    'Kaduna':    'Mixed climate; Shiroro/Kaduna River basin; political-religious land contestation.',
-    'Katsina':   'Sahel; Zobe/Jibiya dams; declining rainfall; insecurity discount on land values.',
-    'Sokoto':    'Sahel; Goronyo Dam flood pulses; insecurity discount.',
-    'Kebbi':     'Niger River basin; rice irrigation; flood plains.',
-    'Zamfara':   'Bakolori Dam; insecurity strongly suppresses land values.',
-    'Jigawa':    'Sahel; Hadejia-Nguru wetlands; Komadugu river basin floods.',
-
-    # North East
-    'Borno':     'Lake Chad basin shrinkage; security risk dominates valuation; Maiduguri urban core resilient.',
-    'Yobe':      'Komadugu river basin; Sahel; insurgency discount.',
-    'Bauchi':    "Jama'are River; Kafin Zaki Dam (under construction); medium flood profile.",
-    'Gombe':     'Gongola River basin; Dadin Kowa Dam; urban Gombe expanding.',
-    'Adamawa':   'Direct downstream of Lagdo Dam (Cameroon); 2022 catastrophic flooding; Yola is high-risk.',
-    'Taraba':    'Taraba/Benue river basins; downstream of Lagdo; annual major flooding.',
-}
+GROQ_MODEL = 'llama-3.3-70b-versatile'
+GROQ_MAX_TOKENS = 4000
+SYSTEM_PROMPT = (
+    'You are a senior environmental risk analyst and land investment advisor '
+    'specialising in Nigerian real estate and climate science. You write '
+    'professional land risk reports used by lawyers, estate agents, '
+    'investors, and individual buyers to make high-stakes purchase decisions. '
+    'Your reports are authoritative, specific, data-driven, and written in '
+    'clear English accessible to non-technical readers. You never use vague '
+    'language. Every risk assessment must cite the specific data provided to '
+    'you. Every projection must reference the actual weather figures and '
+    'climate model data provided.'
+)
 
 
-def _nigeria_region_note(state: str) -> str:
-    key = (state or '').strip().title()
-    return NIGERIA_REGIONS.get(key, 'General Nigerian land context applies.')
+def _display_value(value, default: str = 'Not available') -> str:
+    """Format a scalar value for prompt insertion."""
+    if value in (None, ''):
+        return default
+    return str(value)
 
 
-def _infer_area_type(scan_data: dict) -> str:
-    state = (scan_data.get('state') or '').lower()
-    lga = (scan_data.get('lga') or '').lower()
-    if any(k in lga for k in ['island', 'ikoyi', 'victoria', 'eti-osa', 'eti osa']):
-        return 'High-density urban commercial / luxury residential'
-    if any(k in lga for k in ['ibeju', 'epe', 'ikorodu', 'sangotedo']):
-        return 'Peri-urban / rapidly developing suburban'
-    if state in ['rivers', 'bayelsa', 'delta', 'akwa ibom', 'cross river']:
-        return 'Niger Delta / coastal lowland'
-    if state in ['anambra', 'enugu', 'imo', 'ebonyi', 'abia']:
-        return 'South-East inland (gully erosion belt)'
-    if 'abuja' in state or 'fct' in state:
-        return 'FCT planned urban district (federal land)'
-    if state in ['kano', 'katsina', 'sokoto', 'borno', 'yobe', 'kebbi', 'zamfara', 'jigawa']:
-        return 'Sahel / Sudan savanna'
-    return 'Nigerian urban/suburban'
-
-
-def _infer_terrain(elevation):
-    if elevation is None:
-        return 'Terrain elevation unavailable'
-    elev = float(elevation)
-    if elev < 5:
-        return f'Very low-lying ({elev}m) — high coastal/tidal/flood exposure'
-    if elev < 15:
-        return f'Low elevation ({elev}m) — moderate flood exposure'
-    if elev < 50:
-        return f'Moderate elevation ({elev}m) — manageable flood risk'
-    if elev < 200:
-        return f'Elevated terrain ({elev}m) — lower flood risk'
-    return f'Highland ({elev}m) — cooler climate, low flood risk, possible erosion/landslide'
+def _format_bool(value) -> str:
+    """Render booleans consistently for the prompt."""
+    return 'Yes' if bool(value) else 'No'
 
 
 def build_analysis_prompt(scan_data: dict) -> str:
-    state = scan_data.get('state', 'Nigeria')
-    region_note = _nigeria_region_note(state)
+    """Build the user prompt supplied to Groq."""
+    current = scan_data.get('weather_current') or {}
+    historical = scan_data.get('weather_historical') or {}
+    projection = scan_data.get('weather_projection') or {}
 
-    location_block = f"""
-LOCATION DETAILS
-- Address:        {scan_data.get('address') or 'Not available'}
-- State:          {state}
-- LGA:            {scan_data.get('lga') or 'Unknown'}
-- Coordinates:    {scan_data.get('latitude')}, {scan_data.get('longitude')}
-- Scan radius:    {scan_data.get('radius_km', 1)} km (≈ {round(float(scan_data.get('radius_km') or 1) ** 2 * 3.14159 * 100)} hectares)
-- GPS accuracy:   ±{scan_data.get('accuracy_meters', 'Unknown')} m
-- Elevation:      {scan_data.get('elevation_meters', 'Unknown')} m above sea level
-- Terrain read:   {_infer_terrain(scan_data.get('elevation_meters'))}
-- Area type:      {_infer_area_type(scan_data)}
-- Regional note:  {region_note}
-"""
+    projection_2030 = projection.get('projection_2030') or {}
+    projection_2035 = projection.get('projection_2035') or {}
+    projection_2040 = projection.get('projection_2040') or {}
+    projection_2050 = projection.get('projection_2050') or {}
 
-    is_govt = scan_data.get('is_government_land') or scan_data.get('is_under_acquisition')
-    legal_block = f"""
-LEGAL & OWNERSHIP STATUS
-- Government / acquisition area: {'YES — CRITICAL' if is_govt else 'No government acquisition records detected within scan radius'}
-- Acquiring authority:           {scan_data.get('acquisition_authority') or 'N/A'}
-- Acquisition type:              {scan_data.get('acquisition_type') or 'N/A'}
-- Gazette reference:             {scan_data.get('gazette_reference') or 'N/A'}
-- Legal notes:                   {scan_data.get('legal_notes') or 'N/A'}
-"""
+    address = scan_data.get('address') or scan_data.get('address_hint') or 'Unknown location'
+    address_hint = scan_data.get('address_hint') or 'None provided'
 
-    env_block = f"""
-ENVIRONMENTAL RISK DATA
-Flood:
-- Risk level:                    {scan_data.get('flood_risk_level') or 'Unknown'}
-- Flood zone name:               {scan_data.get('flood_zone_name') or 'No named zone within scan radius'}
-- Flood type:                    {scan_data.get('flood_type') or 'Unknown'}
-- Peak flood months:             {scan_data.get('flood_peak_months') or 'Unknown'}
-- Last major flood year:         {scan_data.get('flood_last_major_year') or 'Unknown'}
-- Notes:                         {scan_data.get('flood_notes') or 'N/A'}
-- Source:                        {scan_data.get('flood_data_source') or 'N/A'}
+    return f"""
+LAND SCAN REPORT REQUEST
 
-Erosion:
-- Risk level:                    {scan_data.get('erosion_risk_level') or 'Unknown'}
+Location: {address}
+Plot description / address hint: {address_hint}
+State: {_display_value(scan_data.get('state'))}, LGA: {_display_value(scan_data.get('lga'))}
+Coordinates: {_display_value(scan_data.get('latitude'))}, {_display_value(scan_data.get('longitude'))}
+Scan radius: {_display_value(scan_data.get('radius_km'))}km
+Elevation: {_display_value(scan_data.get('elevation_meters'))}m above sea level
 
-Dam & water infrastructure:
-- Nearest dam:                   {scan_data.get('nearest_dam_name') or 'None within search range'}
-- Distance to nearest dam:       {scan_data.get('nearest_dam_distance_km') or 'Unknown'} km
-- Dam-driven risk level:         {scan_data.get('dam_risk_level') or 'Unknown'}
-- River basin:                   {scan_data.get('dam_river_basin') or 'Unknown'}
-- Dam capacity:                  {scan_data.get('dam_capacity_mcm') or 'Unknown'} million m³
-- Dam height:                    {scan_data.get('dam_height_m') or 'Unknown'} m
-- Year completed:                {scan_data.get('dam_year_completed') or 'Unknown'}
-- Purpose:                       {scan_data.get('dam_purpose') or 'Unknown'}
-- Downstream states impacted:    {scan_data.get('dam_downstream_states') or 'Unknown'}
-- Operator notes:                {scan_data.get('dam_notes') or 'N/A'}
+RISK SCORES
+Overall risk score: {_display_value(scan_data.get('risk_score'))}/100 ({_display_value(scan_data.get('risk_level'))})
+Flood risk: {_display_value(scan_data.get('flood_risk_level'))} — Zone: {_display_value(scan_data.get('flood_zone_name'))}
+Erosion risk: {_display_value(scan_data.get('erosion_risk_level'))}
+Dam proximity: {_display_value(scan_data.get('nearest_dam_name'))} is {_display_value(scan_data.get('nearest_dam_distance_km'))}km away (risk: {_display_value(scan_data.get('dam_risk_level'))})
 
-Composite:
-- Overall risk score:            {scan_data.get('risk_score') or 'N/A'} / 100
-- Overall risk level:            {scan_data.get('risk_level') or 'Unknown'}
-"""
+LEGAL STATUS
+Government acquisition: {_format_bool(scan_data.get('is_government_land'))}
+Under active acquisition: {_format_bool(scan_data.get('is_under_acquisition'))}
+Authority: {_display_value(scan_data.get('acquisition_authority'))}
+Gazette reference: {_display_value(scan_data.get('gazette_reference'))}
+Legal notes: {_display_value(scan_data.get('legal_notes'))}
 
-    # ── Weather & climate (Open-Meteo, per-scan) ────────────────────
-    cur = scan_data.get('weather_current') or {}
-    hist = scan_data.get('weather_historical') or {}
-    proj = scan_data.get('weather_projection') or {}
-    horizons = (proj.get('horizons') or {}) if isinstance(proj, dict) else {}
+CURRENT WEATHER CONDITIONS
+Temperature: {_display_value(current.get('temperature_c'))}°C
+Humidity: {_display_value(current.get('humidity_percent'))}%
+Today's precipitation: {_display_value(current.get('precipitation_mm'))}mm
+Wind speed: {_display_value(current.get('wind_speed_kmh'))} km/h
+Conditions: {_display_value(current.get('description'))}
 
-    def _delta(a, b):
-        if a is None or b is None:
-            return 'n/a'
-        d = round(a - b, 2)
-        return f"{'+' if d >= 0 else ''}{d}"
+HISTORICAL WEATHER (past 10 years)
+Average annual rainfall: {_display_value(historical.get('avg_annual_rainfall_mm'))}mm/year
+Rainfall trend: {_display_value(historical.get('rainfall_trend'))} (comparing first 5 years to last 5 years)
+Wettest year on record: {_display_value(historical.get('wettest_year'))} with {_display_value(historical.get('wettest_year_rainfall_mm'))}mm
+Driest year on record: {_display_value(historical.get('driest_year'))} with {_display_value(historical.get('driest_year_rainfall_mm'))}mm
+Average maximum temperature: {_display_value(historical.get('avg_max_temp_c'))}°C
+Temperature trend: {_display_value(historical.get('temp_trend'))}
+Extreme rain days (>50mm) per year: {_display_value(historical.get('extreme_rain_days_per_year'))}
 
-    weather_block = f"""
-WEATHER & CLIMATE DATA (Open-Meteo, per-coordinate)
-Now (Africa/Lagos):
-- Temperature:                   {cur.get('temperature_c', 'Unknown')} °C (feels {cur.get('apparent_c', 'Unknown')} °C)
-- Humidity:                      {cur.get('humidity_pct', 'Unknown')} %
-- Wind:                          {cur.get('wind_kph', 'Unknown')} km/h
-- Precipitation last hour:       {cur.get('precipitation_mm', 'Unknown')} mm
-- Forecast 7d max temps:         {cur.get('forecast_7d', {}).get('temp_max_c') if cur else 'n/a'}
-- Forecast 7d rainfall (mm):     {cur.get('forecast_7d', {}).get('rainfall_mm') if cur else 'n/a'}
+CLIMATE PROJECTIONS (MRI_AGCM3_2_S CMIP6 model)
+2030: {_display_value(projection_2030.get('avg_annual_rainfall_mm'))}mm/year avg rainfall, {_display_value(projection_2030.get('avg_max_temp_c'))}°C avg max temp
+2035: {_display_value(projection_2035.get('avg_annual_rainfall_mm'))}mm/year avg rainfall, {_display_value(projection_2035.get('avg_max_temp_c'))}°C avg max temp
+2040: {_display_value(projection_2040.get('avg_annual_rainfall_mm'))}mm/year avg rainfall, {_display_value(projection_2040.get('avg_max_temp_c'))}°C avg max temp
+2050: {_display_value(projection_2050.get('avg_annual_rainfall_mm'))}mm/year avg rainfall, {_display_value(projection_2050.get('avg_max_temp_c'))}°C avg max temp
+Projected rainfall change by 2050: {_display_value(projection.get('rainfall_change_2025_to_2050_percent'))}%
+Projected temperature rise by 2050: +{_display_value(projection.get('temp_change_2025_to_2050_c'), default='0')}°C
+Flood risk trajectory: {_display_value(projection.get('flood_risk_trajectory'))}
 
-Historical (ERA5 reanalysis, {hist.get('period', 'n/a')}):
-- 1990s baseline mean temp:      {hist.get('baseline_temp_c', 'n/a')} °C
-- Recent 10-year mean temp:      {hist.get('recent_temp_c', 'n/a')} °C
-- Δ Temperature shift:           {_delta(hist.get('recent_temp_c'), hist.get('baseline_temp_c'))} °C
-- 1990s baseline annual rain:    {hist.get('baseline_rain_mm', 'n/a')} mm
-- Recent 10-year annual rain:    {hist.get('recent_rain_mm', 'n/a')} mm
-
-CMIP6 multi-model projections (point-level, Open-Meteo Climate API):
-- 2030 horizon mean temp:        {horizons.get('2030', {}).get('temp_mean_c', 'n/a')} °C; rain {horizons.get('2030', {}).get('annual_rain_mm', 'n/a')} mm/yr
-- 2050 horizon mean temp:        {horizons.get('2050', {}).get('temp_mean_c', 'n/a')} °C; rain {horizons.get('2050', {}).get('annual_rain_mm', 'n/a')} mm/yr
-- (Open-Meteo CMIP6 horizons cap at 2050 — beyond-2050 projections rely on coarser IPCC AR6 scenarios.)
-
-Plain-English summary:
-{scan_data.get('weather_summary') or '(weather data unavailable)'}
-"""
-
-    climate_block = """
-NIGERIA CLIMATE & MACRO CONTEXT (for projection modelling)
-- Two-season climate: rainy April–October, dry November–March; rainy season intensifying.
-- IPCC AR6 projections for West Africa: +1.5–2.5°C by 2050; +2.5–4.5°C by 2100 (RCP8.5).
-- West African coast sea-level rise: +0.3–0.6m by 2050; +0.5–1.0m by 2100.
-- Niger Delta land subsidence: 5–25mm/yr in many sites.
-- Rainfall intensity: +10–20% per major rain event since 2000 (NIMET).
-- NIHSA AFO projects ~40% increase in flood-affected communities by 2035.
-- Lagdo Dam (Cameroon) releases continue annually; Nigerian buffer Dasin Hausa never built.
-- Naira inflation: 25–35% YoY since 2023; CBN base rate ~27%; suppresses formal mortgage market.
-- Population: 230M today → projected ~400M by 2050; informal urbanisation accelerating.
-- Lagos Megacity Plan, Abuja Master Plan revisions, Ibadan Master Plan all under federal review.
-"""
-
-    return f"""You are LANDRIFY AI — Nigeria's most precise land-risk analysis engine. Your reader is a Nigerian land buyer who needs a clear, data-driven verdict before signing anything. Write with the authority of a senior environmental consultant, urban planner and climate scientist combined.
-
-You have been given comprehensive scan data for a piece of land in Nigeria.
-Use ONLY the data below — do not invent unsupported figures. Where data is missing, say "limited data" and reason from regional context. Cite Nigerian institutions (NIHSA, NEMA, NESREA, LASURA, FCDA, AGIS, NEWMAP, CBN, NIMET, NPC) where relevant.
-
-{location_block}
-{legal_block}
-{env_block}
-{weather_block}
-{climate_block}
-
-Generate a detailed STRUCTURED REPORT in clean Markdown with EXACTLY these sections (use ## headings):
+Generate a comprehensive land risk report with the following sections:
 
 ## Executive Summary
-4–5 sentence verdict. State the headline risk, the single biggest factor, and one hard number the buyer should remember.
+2-3 sentences. Current overall risk. Suitable or not suitable for purchase without conditions.
 
-## Current State (2026)
-Describe today's land condition: terrain, drainage, neighbourhood character, dominant land use, infrastructure access (water, power, road quality). Reference the actual address and LGA.
+## Current Environmental Conditions
+Analyse the current flood, erosion, and dam risk using the specific data above. Explain what each risk level means practically for this location. Reference the flood zone name if present.
 
-## Legal & Title Outlook
-Explain the legal posture (government acquisition, gazettes, customary land risk, C of O / Governor's Consent likelihood). Specify what title checks the buyer must run, and which Nigerian agency holds the records (e.g., LASURA / AGIS / state Ministry of Lands).
+## Historical Weather Analysis
+Analyse the 10-year rainfall and temperature data. Is this area getting wetter or hotter? What does the {_display_value(historical.get('rainfall_trend'))} trend mean for flood risk? Reference the actual mm figures.
 
-## Environmental Risk Profile
-Quantify flood, erosion and dam-release risk in plain language. Include peak months, last major flood year, expected return period, and downstream/upstream context.
+## 5-Year Projection (2030)
+Based on the CMIP6 climate model projection for 2030, what conditions should a buyer expect? Reference the projected rainfall and temperature figures. What infrastructure or insurance considerations apply?
 
-## Time Projections
-Give specific, dated projections for: **2030**, **2035**, **2040**, **2045**, **2055**, **2065**, **2075**.
-For each year, write 2–3 sentences covering (a) physical risk evolution, (b) likely infrastructure / policy change, (c) directional land-value impact in real (inflation-adjusted) terms.
+## 10-Year Projection (2035)
+Same structure. Reference 2035 figures specifically.
 
-## Property Value Outlook
-Estimate directional value trajectory (e.g., "compounded ~8–12%/yr nominal, ~2–4%/yr real over 10 years if Pro infrastructure delivers; flat-to-negative if flood frequency doubles"). Identify the 3 levers that move the value most.
+## 15-Year Projection (2040)
+Same structure. Reference 2040 figures specifically.
 
-## Comparable Areas
-Name 3 nearby Nigerian areas that share the risk profile (or sit one step better/worse) so the buyer has a frame of reference. Be specific (e.g., "Comparable to Sangotedo before 2018 corridor upgrade").
+## 25-Year Projection (2050)
+Long-term outlook. Reference the 2050 projected rainfall change ({_display_value(projection.get('rainfall_change_2025_to_2050_percent'))}%) and temperature change (+{_display_value(projection.get('temp_change_2025_to_2050_c'), default='0')}°C). What is the long-term investment viability given the {_display_value(projection.get('flood_risk_trajectory'))} trajectory?
 
-## Climate-Adaptation & Mitigation Plan
-Concrete, costed actions the buyer should budget for in the first 5 years (foundation elevation, perimeter drainage, retaining wall, insurance, slope stabilisation). Use Naira ranges where you can.
+## Legal Risk Assessment
+Analyse the legal status. If government acquisition is found, explain the risk clearly. If clear, confirm what independent verification is still recommended (C of O, survey plan, gazette search).
 
-## Insurance & Financing Implications
-Will Nigerian banks finance here? Expected mortgage LTV / interest premium. Which insurance products apply (flood, fire, builders risk) and roughly what they cost.
+## Recommendations
+5-7 specific, actionable recommendations for this exact plot. Reference the actual risks identified. Number each recommendation.
 
-## Investment Verdict
-One of: **BUY**, **BUY WITH CAUTION**, **HOLD**, **AVOID**. Justify in 3 sentences with 1–2 specific conditions that must be true for the verdict to hold.
+## Risk Mitigation
+Practical steps the buyer or developer can take to reduce the identified risks — insurance, foundation design, drainage, legal verification, survey.
 
-## Action Checklist
-A concise 7-item checklist (numbered) the buyer should complete BEFORE signing — title search, charting, survey beacons, neighbour interviews, NIHSA flood map cross-check, etc.
-
-## Data Sources & Disclaimer
-List the data sources actually used (e.g., NIHSA AFO 2024, Mapbox satellite, Nominatim, OpenElevation) and a one-paragraph disclaimer that this is advisory only.
-
-Style requirements:
-- Be specific, data-driven, and Nigerian. Use real institution names and real place names.
-- Use **bold** for the most important numbers in each paragraph.
-- Avoid generic filler. Every projection must trace back to data above.
-- Where the data is silent, state so plainly and reason carefully from regional context.
-"""
+## Disclaimer
+This report is generated from environmental data and AI analysis. It does not constitute legal or engineering advice. Independent professional verification is strongly recommended before any land transaction.
+""".strip()
 
 
 def generate_ai_report(scan_data: dict) -> dict:
-    """
-    Call Groq to generate the long-form land-risk report.
-    Returns a dict: {status, report, model, tokens_used, ai_powered}.
-    """
+    """Generate the Landrify AI report or a structured fallback when unavailable."""
     api_key = settings.GROQ_API_KEY
     if not api_key:
-        logger.warning("GROQ_API_KEY not set — returning placeholder report.")
-        return _placeholder_report(scan_data)
+        logger.warning("GROQ_API_KEY not set; using placeholder report.")
+        fallback = _placeholder_report(scan_data)
+        fallback['status'] = 'missing_api_key'
+        return fallback
 
-    client = Groq(api_key=api_key)
+    try:
+        client = Groq(api_key=api_key)
+    except Exception as exc:
+        logger.error("Failed to initialise Groq client: %s", exc)
+        fallback = _placeholder_report(scan_data)
+        fallback['status'] = 'client_init_failed'
+        return fallback
+
     prompt = build_analysis_prompt(scan_data)
 
     try:
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=GROQ_MODEL,
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are Landrify AI — Nigeria's most precise land-risk analysis engine. "
-                        "You write structured, data-grounded, time-projected reports for Nigerian "
-                        "land buyers. You ALWAYS ground analysis in the data provided and cite "
-                        "Nigerian institutions (NIHSA, NEMA, NESREA, LASURA, FCDA, AGIS, NEWMAP, "
-                        "CBN, NIMET) where relevant. You never invent unsupported figures."
-                    ),
-                },
-                {"role": "user", "content": prompt},
+                {'role': 'system', 'content': SYSTEM_PROMPT},
+                {'role': 'user', 'content': prompt},
             ],
-            temperature=0.35,
-            max_tokens=6500,
+            temperature=0.2,
+            max_tokens=GROQ_MAX_TOKENS,
             top_p=0.9,
         )
-
-        report_text = response.choices[0].message.content
+        report_text = (response.choices[0].message.content or '').strip()
         usage = response.usage
         return {
             'status': 'success',
             'report': report_text,
-            'model': response.model,
+            'model': GROQ_MODEL,
             'tokens_used': {
-                'prompt': usage.prompt_tokens,
-                'completion': usage.completion_tokens,
-                'total': usage.total_tokens,
+                'prompt': getattr(usage, 'prompt_tokens', None),
+                'completion': getattr(usage, 'completion_tokens', None),
+                'total': getattr(usage, 'total_tokens', None),
             },
-            'ai_powered': True,
         }
-
-    except Exception as e:
-        logger.error(f"Groq API error: {e}")
+    except Exception as exc:
+        logger.error("Groq AI report generation failed: %s", exc)
         fallback = _placeholder_report(scan_data)
-        fallback['error'] = str(e)
         fallback['status'] = 'error'
         return fallback
 
 
 def _placeholder_report(scan_data: dict) -> dict:
-    state = scan_data.get('state', 'the selected area')
-    risk = scan_data.get('risk_level', 'unknown')
-    score = scan_data.get('risk_score', 'N/A')
-    flood = scan_data.get('flood_risk_level', 'unknown')
+    """Return a deterministic fallback report when Groq is unavailable."""
+    address = scan_data.get('address') or scan_data.get('address_hint') or 'the selected plot'
+    state = _display_value(scan_data.get('state'))
+    lga = _display_value(scan_data.get('lga'))
+    risk_level = _display_value(scan_data.get('risk_level'))
+    risk_score = _display_value(scan_data.get('risk_score'))
+    flood_level = _display_value(scan_data.get('flood_risk_level'))
+    erosion_level = _display_value(scan_data.get('erosion_risk_level'))
+    dam_name = _display_value(scan_data.get('nearest_dam_name'))
+    dam_distance = _display_value(scan_data.get('nearest_dam_distance_km'))
+    legal_notes = _display_value(scan_data.get('legal_notes'))
+
+    current = scan_data.get('weather_current') or {}
+    historical = scan_data.get('weather_historical') or {}
+    projection = scan_data.get('weather_projection') or {}
+    projection_2030 = projection.get('projection_2030') or {}
+    projection_2035 = projection.get('projection_2035') or {}
+    projection_2040 = projection.get('projection_2040') or {}
+    projection_2050 = projection.get('projection_2050') or {}
 
     report = f"""## Executive Summary
-This land in {state} has an overall risk score of **{score}/100** ({risk} risk).
-Current flood risk reads as **{flood}**. The full Landrify AI time-projection report
-requires a Groq API key — set `GROQ_API_KEY` in the server environment to enable it.
+The scan for {address} in {lga}, {state} produced an overall risk score of {risk_score}/100, classified as {risk_level}. This plot should not be treated as purchase-ready until the environmental and legal items below are independently checked.
 
-## Set GROQ_API_KEY to unlock
-1. Get a free key at console.groq.com (no card required).
-2. Add `GROQ_API_KEY=...` to the backend `.env`.
-3. Re-run this scan — the full ~12-section report will populate automatically.
-"""
+## Current Environmental Conditions
+Flood exposure is currently rated {flood_level}, erosion exposure is rated {erosion_level}, and the nearest tracked dam is {dam_name} at approximately {dam_distance}km. These values indicate the site should be reviewed with local drainage, soil, and watershed conditions in mind before development begins.
+
+## Historical Weather Analysis
+Over the past 10 years, the site has averaged {_display_value(historical.get('avg_annual_rainfall_mm'))}mm of rainfall per year with a {_display_value(historical.get('rainfall_trend'))} rainfall trend. Average maximum temperature is {_display_value(historical.get('avg_max_temp_c'))}°C with a {_display_value(historical.get('temp_trend'))} temperature trend, which should be considered in drainage sizing and long-term land-use planning.
+
+## 5-Year Projection (2030)
+The MRI_AGCM3_2_S model projects {_display_value(projection_2030.get('avg_annual_rainfall_mm'))}mm/year of rainfall and an average maximum temperature of {_display_value(projection_2030.get('avg_max_temp_c'))}°C by 2030. Buyers should factor these projections into early drainage, grading, and insurance decisions.
+
+## 10-Year Projection (2035)
+By 2035, projected rainfall is {_display_value(projection_2035.get('avg_annual_rainfall_mm'))}mm/year and projected average maximum temperature is {_display_value(projection_2035.get('avg_max_temp_c'))}°C. Medium-term planning should account for heat load, runoff control, and maintenance budgets.
+
+## 15-Year Projection (2040)
+The 2040 outlook indicates {_display_value(projection_2040.get('avg_annual_rainfall_mm'))}mm/year rainfall and {_display_value(projection_2040.get('avg_max_temp_c'))}°C average maximum temperature. Long-life assets on the plot should therefore be designed with resilient drainage and robust foundation detailing.
+
+## 25-Year Projection (2050)
+The 2050 climate outlook shows {_display_value(projection_2050.get('avg_annual_rainfall_mm'))}mm/year rainfall and {_display_value(projection_2050.get('avg_max_temp_c'))}°C average maximum temperature, with projected rainfall change of {_display_value(projection.get('rainfall_change_2025_to_2050_percent'))}% and temperature change of +{_display_value(projection.get('temp_change_2025_to_2050_c'), default='0')}°C. The projected flood trajectory is {_display_value(projection.get('flood_risk_trajectory'))}, which should influence the long-term investment case.
+
+## Legal Risk Assessment
+Government acquisition indicators currently read {_format_bool(scan_data.get('is_government_land'))}, and the scan notes are: {legal_notes}. Independent checks should still include title verification, survey plan validation, and gazette review before any payment is made.
+
+## Recommendations
+1. Confirm title documents with a qualified Nigerian property lawyer.
+2. Validate the survey plan and physical beacons on site.
+3. Review local drainage, runoff paths, and fill levels before construction.
+4. Compare the site elevation and flood rating with nearby parcels.
+5. Budget for insurance and resilient foundation design where flood exposure is material.
+
+## Risk Mitigation
+Use engineered drainage, site grading, and foundation design suited to the reported flood and erosion profile. Pair environmental mitigation with legal verification, including C of O checks, survey confirmation, and any relevant gazette search.
+
+## Disclaimer
+This report is generated from environmental data and AI analysis. It does not constitute legal or engineering advice. Independent professional verification is strongly recommended before any land transaction."""
+
     return {
-        'status': 'placeholder',
         'report': report,
-        'ai_powered': False,
-        'message': 'Set GROQ_API_KEY to enable full AI reports. Free at console.groq.com',
+        'model': 'placeholder',
+        'tokens_used': {'prompt': 0, 'completion': 0, 'total': 0},
     }

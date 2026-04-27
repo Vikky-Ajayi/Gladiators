@@ -2,8 +2,6 @@ import { useEffect, useState } from 'react';
 import client from '../api/client';
 
 export interface PublicConfig {
-  mapbox_token: string;
-  google_client_id: string;
   test_mode: boolean;
 }
 
@@ -29,16 +27,14 @@ const fetchConfig = async () => {
 };
 
 /**
- * Fetches the small set of safe-for-client settings (Mapbox public token,
- * Google client id) once and caches the result for the rest of the session.
+ * Fetches the small set of safe-for-client settings that still come from the
+ * backend at runtime.
  */
 export function usePublicConfig(): PublicConfig | null {
   const [cfg, setCfg] = useState<PublicConfig | null>(cache);
   useEffect(() => {
     if (cfg) return;
-    fetchConfig().then(setCfg).catch(() => setCfg({
-      mapbox_token: '', google_client_id: '', test_mode: false,
-    }));
+    fetchConfig().then(setCfg).catch(() => setCfg({ test_mode: false }));
   }, [cfg]);
   return cfg;
 }

@@ -26,6 +26,7 @@ export interface ScanResult {
   latitude: string;
   longitude: string;
   radius_km: string;
+  address_hint?: string;
   address: string;
   state: string;
   lga: string;
@@ -38,40 +39,61 @@ export interface ScanResult {
   ai_report: string;
   ai_report_model: string;
   ai_report_tokens: number | null;
-  weather_current?: {
-    observed_at?: string;
-    temperature_c?: number;
-    apparent_c?: number;
-    humidity_pct?: number;
-    wind_kph?: number;
-    precipitation_mm?: number;
-    weather_code?: number;
-    forecast_7d?: {
-      dates: string[];
-      temp_max_c: (number | null)[];
-      temp_min_c: (number | null)[];
-      rainfall_mm: (number | null)[];
-      wind_max_kph: (number | null)[];
-    };
-    source?: string;
-  } | null;
-  weather_historical?: {
-    period?: string;
-    baseline_temp_c?: number | null;
-    recent_temp_c?: number | null;
-    baseline_rain_mm?: number | null;
-    recent_rain_mm?: number | null;
-    annual?: Array<{ year: number; temp_mean_c: number | null; temp_max_c: number | null; temp_min_c: number | null; rainfall_mm: number | null }>;
-    source?: string;
-  } | null;
-  weather_projection?: {
-    horizons?: Record<string, { temp_mean_c: number | null; annual_rain_mm: number | null }>;
-    source?: string;
-  } | null;
+  weather?: WeatherBundle | null;
+  weather_current?: WeatherCurrent | null;
+  weather_historical?: WeatherHistorical | null;
+  weather_projection?: WeatherProjection | null;
   weather_summary?: string;
   report_generated: boolean;
   payment_status?: string;
   upgrade_prompt?: UpgradePrompt;
+}
+
+export interface WeatherCurrent {
+  temperature_c?: number | null;
+  humidity_percent?: number | null;
+  precipitation_mm?: number | null;
+  wind_speed_kmh?: number | null;
+  weather_code?: number | null;
+  description?: string;
+}
+
+export interface WeatherHistorical {
+  avg_annual_rainfall_mm?: number | null;
+  total_rainfall_period_mm?: number | null;
+  rainfall_trend?: 'increasing' | 'stable' | 'decreasing' | string;
+  avg_max_temp_c?: number | null;
+  avg_min_temp_c?: number | null;
+  temp_trend?: 'warming' | 'stable' | 'cooling' | string;
+  years_analysed?: number | null;
+  wettest_year?: number | null;
+  wettest_year_rainfall_mm?: number | null;
+  driest_year?: number | null;
+  driest_year_rainfall_mm?: number | null;
+  extreme_rain_days_per_year?: number | null;
+}
+
+export interface WeatherProjectionSnapshot {
+  avg_annual_rainfall_mm?: number | null;
+  avg_max_temp_c?: number | null;
+}
+
+export interface WeatherProjection {
+  projection_2030?: WeatherProjectionSnapshot | null;
+  projection_2035?: WeatherProjectionSnapshot | null;
+  projection_2040?: WeatherProjectionSnapshot | null;
+  projection_2050?: WeatherProjectionSnapshot | null;
+  rainfall_change_2025_to_2050_percent?: number | null;
+  temp_change_2025_to_2050_c?: number | null;
+  flood_risk_trajectory?: 'worsening' | 'stable' | 'improving' | string;
+  model?: string;
+}
+
+export interface WeatherBundle {
+  current?: WeatherCurrent | null;
+  historical?: WeatherHistorical | null;
+  projection?: WeatherProjection | null;
+  summary?: string;
 }
 
 export interface LegalStatus {
@@ -85,7 +107,7 @@ export interface LegalStatus {
 export interface EnvironmentalRisks {
   flood: { risk_level: string; zone_name: string; data_source: string; };
   erosion: { risk_level: string; };
-  dam_proximity: { nearest_dam: string; distance_km: number; risk_level: string; };
+  dam_proximity: { nearest_dam: string; distance_km: number | string | null; risk_level: string; };
 }
 
 export interface AuthResponse {

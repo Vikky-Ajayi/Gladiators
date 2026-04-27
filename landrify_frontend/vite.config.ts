@@ -5,10 +5,12 @@ import {defineConfig, loadEnv} from 'vite';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
+  const apiProxyTarget = env.VITE_API_PROXY_TARGET || 'http://localhost:8000';
   return {
     plugins: [react(), tailwindcss()],
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+    build: {
+      outDir: 'dist',
+      sourcemap: false,
     },
     resolve: {
       alias: {
@@ -22,11 +24,11 @@ export default defineConfig(({mode}) => {
       hmr: process.env.DISABLE_HMR !== 'true',
       proxy: {
         '/api': {
-          target: 'http://localhost:8000',
+          target: apiProxyTarget,
           changeOrigin: true,
         },
         '/admin': {
-          target: 'http://localhost:8000',
+          target: apiProxyTarget,
           changeOrigin: true,
         },
       },

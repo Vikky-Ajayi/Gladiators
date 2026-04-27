@@ -1,7 +1,7 @@
 # Core
-Django>=4.2,<5.2
-djangorestframework>=3.14
-django-cors-headers>=4.0
+django>=5.1
+djangorestframework
+django-cors-headers
 
 # Auth
 django-rest-knox>=4.2
@@ -9,14 +9,14 @@ dj-database-url
 
 
 # Database
-psycopg2-binary>=2.9
+psycopg2-binary
 django-filter>=23.0
 
 # API Docs
-drf-spectacular>=0.26
+drf-spectacular
 
 # External APIs
-requests>=2.28
+requests
 
 # Environment
 python-decouple>=3.8
@@ -25,14 +25,14 @@ python-decouple>=3.8
 reportlab>=4.0
 
 # LLM — Groq (core product: AI time-projection report)
-groq>=0.9
+groq
 
 # Google Identity Services (Google Sign-In ID-token verification)
 google-auth>=2.30
 
 # Production server
-gunicorn>=21.0
+gunicorn
 
 # Utilities
-Pillow>=10.0
-whitenoise>=6.0
+Pillow
+whitenoise

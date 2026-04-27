@@ -104,12 +104,13 @@ class LandScan(models.Model):
     scan_reference = models.CharField(max_length=30, unique=True)
 
     # ── Location ──────────────────────────────────────────────────────
-    latitude        = models.DecimalField(max_digits=10, decimal_places=8)
-    longitude       = models.DecimalField(max_digits=11, decimal_places=8)
+    latitude        = models.DecimalField(max_digits=20, decimal_places=15)
+    longitude       = models.DecimalField(max_digits=20, decimal_places=15)
     accuracy_meters = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
-    radius_km       = models.DecimalField(max_digits=5, decimal_places=2, default=0.5)  # User-selected area radius
+    radius_km       = models.DecimalField(max_digits=5, decimal_places=2, default=0.05)  # User-selected area radius
 
     # Reverse geocoded
+    address_hint = models.TextField(blank=True)
     address  = models.TextField(blank=True)
     lga      = models.CharField(max_length=100, blank=True)
     state    = models.CharField(max_length=50, blank=True)
@@ -157,6 +158,7 @@ class LandScan(models.Model):
 
     # ── Terrain ───────────────────────────────────────────────────────
     elevation_meters = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    satellite_image_url = models.URLField(max_length=2000, blank=True)
 
     # ── Weather & Climate (Open-Meteo) ────────────────────────────────
     # current  →  live snapshot at scan time

@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { usePublicConfig } from '../hooks/usePublicConfig';
 
 interface Props {
   latitude: number | null;
@@ -27,15 +26,15 @@ export function MapPreview({
   onPick,
   className,
 }: Props) {
-  const config = usePublicConfig();
+  const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN ?? '';
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markerRef = useRef<mapboxgl.Marker | null>(null);
 
   // Init map once we have a token + a container.
   useEffect(() => {
-    if (!config?.mapbox_token || !containerRef.current || mapRef.current) return;
-    mapboxgl.accessToken = config.mapbox_token;
+    if (!mapboxToken || !containerRef.current || mapRef.current) return;
+    mapboxgl.accessToken = mapboxToken;
     const map = new mapboxgl.Map({
       container: containerRef.current,
       style: 'mapbox://styles/mapbox/satellite-streets-v12',
@@ -74,7 +73,7 @@ export function MapPreview({
       map.remove();
       mapRef.current = null;
     };
-  }, [config?.mapbox_token, onPick]);
+  }, [mapboxToken, onPick]);
 
   // Update marker + circle whenever coords / radius change.
   useEffect(() => {
@@ -109,7 +108,7 @@ export function MapPreview({
   // for), 16/10 on tablets and up. We expose this on every render path.
   const aspectClass = 'aspect-square sm:aspect-[16/10]';
 
-  if (config && !config.mapbox_token) {
+  if (!mapboxToken) {
     // No token → show static satellite tile via the backend if available.
     const fallbackLat = latitude ?? NIGERIA_CENTER[1];
     const fallbackLng = longitude ?? NIGERIA_CENTER[0];
@@ -124,7 +123,7 @@ export function MapPreview({
             <p className="text-sm font-medium">Map preview unavailable</p>
             <p className="text-xs mt-1 max-w-xs">
               Mapbox token not configured. Live satellite preview requires{' '}
-              <code className="bg-gray-200 px-1 rounded text-[11px]">MAPBOX_TOKEN</code> on the backend.
+              <code className="bg-gray-200 px-1 rounded text-[11px]">VITE_MAPBOX_TOKEN</code> in the frontend env.
             </p>
             {latitude != null && longitude != null && (
               <p className="text-[11px] font-mono mt-3">

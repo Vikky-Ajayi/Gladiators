@@ -7,6 +7,24 @@ from rest_framework.views import APIView
 from .models import Alert
 
 
+FALSE_VALUES = {'0', 'false', 'no', 'off'}
+TRUE_VALUES = {'1', 'true', 'yes', 'on'}
+
+
+def _parse_bool(value):
+    """Normalise string and boolean payloads from JSON/form submissions."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return None
+    normalised = str(value).strip().lower()
+    if normalised in TRUE_VALUES:
+        return True
+    if normalised in FALSE_VALUES:
+        return False
+    return None
+
+
 class AlertListView(APIView):
     """GET /api/v1/alerts/ — Paginated list of user alerts."""
     permission_classes = [IsAuthenticated]
@@ -88,8 +106,9 @@ class AlertSettingsView(APIView):
             'land_scan__state', 'land_scan__lga',
         )
         return Response({
-            'subscription_status': request.user.subscription_status,
-            'subscription_expires_at': request.user.subscription_expires_at,
+            'subscription_status': 'active' if request.user.is_pro else 'basic',
+            'subscription_expires_at': request.user.pro_expires_at,
+            'plan': request.user.plan,
             'saved_lands_alerts': list(saved_lands),
         })
 
@@ -97,7 +116,7 @@ class AlertSettingsView(APIView):
         """Toggle alerts for a specific saved land."""
         from apps.scans.models import SavedLand
         saved_id = request.data.get('saved_land_id')
-        alert_enabled = request.data.get('alert_enabled')
+        alert_enabled = _parse_bool(request.data.get('alert_enabled'))
 
         if saved_id is None or alert_enabled is None:
             return Response(
@@ -110,6 +129,6 @@ class AlertSettingsView(APIView):
         except SavedLand.DoesNotExist:
             return Response({'error': 'Saved land not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        saved.alert_enabled = bool(alert_enabled)
+        saved.alert_enabled = alert_enabled
         saved.save(update_fields=['alert_enabled'])
         return Response({'status': 'updated', 'alert_enabled': saved.alert_enabled})

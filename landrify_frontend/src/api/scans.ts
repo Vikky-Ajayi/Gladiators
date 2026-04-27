@@ -5,6 +5,7 @@ export const createScan = (payload: {
   latitude: number;
   longitude: number;
   radius_km: number;
+  address_hint?: string;
 }) => client.post<ScanResult>('/api/v1/scans/', payload).then(r => r.data);
 
 export interface GeocodeResult {
@@ -21,7 +22,7 @@ export interface GeocodeResult {
  * Forward-geocode a free-text address (Nigeria-bounded). Returns up to `limit`
  * candidate matches with coordinates and admin context.
  */
-export const geocodeAddress = (q: string, limit = 6) =>
+export const geocodeAddress = (q: string, limit = 8) =>
   client
     .get<{ query: string; results: GeocodeResult[] }>(
       '/api/v1/scans/geocode/',
@@ -51,4 +52,4 @@ export const demoScan = (location: string) =>
 export const getUserScans = () =>
   client
     .get<PaginatedResponse<ScanResult>>('/api/v1/users/me/scans/')
-    .then((r) => r.data.results ?? []);
+    .then((r) => r.data);

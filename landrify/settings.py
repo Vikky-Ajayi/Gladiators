@@ -1,13 +1,24 @@
-import os
 from pathlib import Path
 from urllib.parse import urlparse
-from decouple import config, Csv
-import dj_database_url
+from decouple import Csv, config
+
+try:
+    import dj_database_url
+except ImportError:  # pragma: no cover - optional local fallback
+    dj_database_url = None
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_DATABASE_URL = f"sqlite:///{(BASE_DIR / 'db.sqlite3').as_posix()}"
+DEFAULT_FRONTEND_URL = 'http://localhost:5173'
+DEFAULT_API_BASE_URL = 'http://127.0.0.1:8000'
+DEFAULT_CORS_ALLOWED_ORIGINS = (
+    'http://localhost:3000,http://localhost:5000,http://localhost:5173,'
+    'http://127.0.0.1:3000,http://127.0.0.1:5000,http://127.0.0.1:5173'
+)
 
-SECRET_KEY = config('DJANGO_SECRET_KEY', default='django-insecure-change-this-in-production-now')
+SECRET_KEY = config('DJANGO_SECRET_KEY', default='landrify-local-dev-secret-key-change-before-production-2026')
 DEBUG = config('DEBUG', default=False, cast=bool)
+APP_VERSION = config('APP_VERSION', default='1.0.0')
 
 
 def _normalize_allowed_host(raw_host: str) -> str:
@@ -20,6 +31,37 @@ def _normalize_allowed_host(raw_host: str) -> str:
         host = urlparse(host).netloc or urlparse(host).path
     host = host.strip('/').split('/')[0]
     return host
+
+
+def _build_database_config(database_url: str) -> dict:
+    """Parse DATABASE_URL with dj-database-url when available, or via a small fallback."""
+    if dj_database_url is not None:
+        return dj_database_url.config(
+            default=database_url,
+            conn_max_age=600,
+            ssl_require=False,
+        )
+
+    parsed = urlparse(database_url)
+    if parsed.scheme == 'sqlite':
+        sqlite_path = parsed.path.lstrip('/') or str(BASE_DIR / 'db.sqlite3')
+        return {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': sqlite_path,
+        }
+
+    if parsed.scheme in {'postgres', 'postgresql'}:
+        return {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': parsed.path.lstrip('/'),
+            'USER': parsed.username or '',
+            'PASSWORD': parsed.password or '',
+            'HOST': parsed.hostname or '',
+            'PORT': str(parsed.port or ''),
+            'CONN_MAX_AGE': 600,
+        }
+
+    raise ValueError(f'Unsupported DATABASE_URL scheme: {parsed.scheme}')
 
 
 _raw_allowed_hosts = config('ALLOWED_HOSTS', default='*', cast=Csv())
@@ -82,14 +124,8 @@ WSGI_APPLICATION = 'landrify.wsgi.application'
 
 # Database — plain PostgreSQL (no PostGIS for hackathon speed)
 DATABASES = {
-    'default': dj_database_url.config(
-        default=config('DATABASE_URL'),
-        conn_max_age=600,
-        ssl_require=False
-    )
+    'default': _build_database_config(config('DATABASE_URL', default=DEFAULT_DATABASE_URL))
 }
-# This ensures Django uses the correct PostgreSQL engine
-DATABASES['default']['ENGINE'] = 'django.db.backends.postgresql'
 
 AUTH_USER_MODEL = 'users.User'
 
@@ -150,8 +186,8 @@ REST_KNOX = {
 # ── URLs — 100% driven by environment variables, zero hardcoding ───────────────
 # FRONTEND_URL  → your React app (local: http://localhost:5173, prod: https://app.vercel.app)
 # API_BASE_URL  → this Django server (local: http://127.0.0.1:8000, prod: https://api.railway.app)
-FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5000')
-API_BASE_URL  = config('API_BASE_URL', default='http://127.0.0.1:8000')
+FRONTEND_URL = config('FRONTEND_URL', default=DEFAULT_FRONTEND_URL)
+API_BASE_URL = config('API_BASE_URL', default=DEFAULT_API_BASE_URL)
 
 # Interswitch environment toggle: 'sandbox' or 'production'
 INTERSWITCH_ENV = config('INTERSWITCH_ENV', default='sandbox')
@@ -164,33 +200,28 @@ MOCK_INTERSWITCH_IDENTITY = config('MOCK_INTERSWITCH_IDENTITY', default='', cast
 
 # CORS — explicit origins from env, plus sensible defaults for local dev
 # AND any Vercel / Replit deployment automatically (via regex).
-CORS_ALLOWED_ORIGINS = config(
-    'CORS_ALLOWED_ORIGINS',
-    default=(
-        'http://localhost:3000,http://localhost:5000,http://localhost:5173,'
-        'http://127.0.0.1:3000,http://127.0.0.1:5000,http://127.0.0.1:5173'
-    ),
-    cast=Csv(),
-)
-# Auto-allow any Vercel preview / production frontend and Replit dev domains.
-CORS_ALLOWED_ORIGIN_REGEXES = [
-    r"^https://.*\.vercel\.app$",
-    r"^https://.*\.replit\.dev$",
-    r"^https://.*\.replit\.app$",
-]
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+    CORS_ALLOWED_ORIGINS = [origin for origin in DEFAULT_CORS_ALLOWED_ORIGINS.split(',') if origin]
+else:
+    CORS_ALLOWED_ORIGINS = [
+        origin.strip()
+        for origin in config('CORS_ALLOWED_ORIGINS', default='http://localhost:5173').split(',')
+        if origin.strip()
+    ]
 CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS) + [
-    'https://*.vercel.app', 'https://*.replit.dev', 'https://*.replit.app',
-]
+CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS)
 
 # DRF Spectacular (API Docs)
 SPECTACULAR_SETTINGS = {
     'TITLE': 'Landrify API',
     'DESCRIPTION': 'Land verification platform for Nigeria. Verify land ownership, flood risk, erosion risk, and environmental hazards before you buy.',
-    'VERSION': '1.0.0',
+    'VERSION': APP_VERSION,
     'SERVE_INCLUDE_SCHEMA': False,
     'CONTACT': {'email': 'api@landrify.ng'},
 }
+
+SILENCED_SYSTEM_CHECKS = ['drf_spectacular.W001', 'drf_spectacular.W002']
 
 # External APIs
 # Mapbox — satellite imagery (FREE, no card: account.mapbox.com/auth/signup)
@@ -240,7 +271,7 @@ INTERSWITCH_IDENTITY_MOCK_ACTIVE = MOCK_INTERSWITCH_IDENTITY or not (
 # Pricing (in Naira)
 # Basic plan: 1 free scan ever — basic risk report, no AI projections
 # Pro plan:   ₦5,000/month — unlimited scans + full Groq AI time-projection report
-PRO_PRICE_NAIRA = 5000
+PRO_PRICE_NAIRA = config('PRO_PRICE_NAIRA', default=5000, cast=int)
 
 # Logging
 LOGGING = {
@@ -270,3 +301,16 @@ LOGGING = {
         },
     },
 }
+
+if not DEBUG:
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'DENY'
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=True, cast=bool)
+    SESSION_COOKIE_SECURE = config('SESSION_COOKIE_SECURE', default=True, cast=bool)
+    CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=True, cast=bool)
+    SECURE_HSTS_SECONDS = config('SECURE_HSTS_SECONDS', default=31536000, cast=int)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = config('SECURE_HSTS_INCLUDE_SUBDOMAINS', default=True, cast=bool)
+    SECURE_HSTS_PRELOAD = config('SECURE_HSTS_PRELOAD', default=True, cast=bool)
+    SECURE_REFERRER_POLICY = config('SECURE_REFERRER_POLICY', default='same-origin')

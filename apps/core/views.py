@@ -7,9 +7,9 @@ POST /api/v1/demo-scan/    — Demo scan with preset Lagos coordinates (no auth 
 """
 import logging
 from django.conf import settings
-from django.db import connection
+from django.db import DatabaseError, connection
 from rest_framework import status
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -31,13 +31,14 @@ class HealthCheckView(APIView):
         db_ok = True
         try:
             connection.ensure_connection()
-        except Exception:
+        except DatabaseError as exc:
             db_ok = False
+            logger.warning("Database connectivity check failed: %s", exc)
 
         payload = {
             'status': 'ok' if db_ok else 'degraded',
             'service': 'landrify-api',
-            'version': '1.0.0',
+            'version': settings.APP_VERSION,
             'database': 'connected' if db_ok else 'unavailable',
             'built_for': 'Enyata Buildathon × Interswitch Developer Community',
         }
@@ -74,7 +75,7 @@ class PlatformStatsView(APIView):
                     'registered_users': User.objects.count(),
                     'total_scans': LandScan.objects.count(),
                     'completed_scans': LandScan.objects.filter(status='completed').count(),
-                    'premium_scans': LandScan.objects.filter(scan_type='premium').count(),
+                    'pro_scans': LandScan.objects.filter(scan_type='pro').count(),
                 },
                 'risk_engine': {
                     'factors': ['legal_status', 'flood_risk', 'erosion_risk', 'dam_proximity'],
@@ -88,10 +89,10 @@ class PlatformStatsView(APIView):
                     },
                 },
                 'payment_provider': 'Interswitch Webpay',
-                'built_with': ['Django 5', 'PostgreSQL', 'Interswitch API', 'Google Maps API'],
+                'built_with': ['Django', 'PostgreSQL', 'Interswitch API', 'Mapbox', 'OpenStreetMap'],
             }
-        except Exception as e:
-            logger.error(f"Stats error: {e}")
+        except Exception as exc:
+            logger.exception("Stats error: %s", exc)
             return Response({'error': 'Stats unavailable.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         return Response(stats)
@@ -217,11 +218,11 @@ class DemoScanView(APIView):
 
         try:
             run_land_scan(scan)
-        except Exception as e:
-            logger.error(f"Demo scan error: {e}")
+        except Exception as exc:
+            logger.exception("Demo scan error: %s", exc)
             scan.status = 'failed'
             scan.save(update_fields=['status'])
-            return Response({'error': 'Scan processing failed.', 'detail': str(e)},
+            return Response({'error': 'Scan processing failed.', 'detail': str(exc)},
                             status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         response_data = LandScanDetailSerializer(scan).data
