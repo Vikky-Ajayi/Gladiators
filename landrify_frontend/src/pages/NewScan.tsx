@@ -95,6 +95,10 @@ function isWithinNigeria(latitude: number, longitude: number) {
   return latitude >= 4 && latitude <= 14 && longitude >= 2.5 && longitude <= 15;
 }
 
+function normalizeCoordinate(value: number) {
+  return Number(value.toFixed(6));
+}
+
 function parseSharedLocation(input: string) {
   const trimmed = input.trim();
   if (!trimmed) {
@@ -240,8 +244,11 @@ export function NewScan() {
     newLongitude: number,
     options?: { label?: string; address?: string; accuracyMeters?: number | null },
   ) => {
-    setLatitude(newLatitude);
-    setLongitude(newLongitude);
+    const normalizedLatitude = normalizeCoordinate(newLatitude);
+    const normalizedLongitude = normalizeCoordinate(newLongitude);
+
+    setLatitude(normalizedLatitude);
+    setLongitude(normalizedLongitude);
     setAccuracy(options?.accuracyMeters ?? null);
     setError(null);
 
@@ -258,14 +265,17 @@ export function NewScan() {
     }
 
     try {
-      const reverse = await reverseGeocode(newLatitude, newLongitude);
-      const resolvedAddress = reverse.display_name || `${newLatitude.toFixed(6)}, ${newLongitude.toFixed(6)}`;
+      const reverse = await reverseGeocode(normalizedLatitude, normalizedLongitude);
+      const resolvedAddress =
+        reverse.address
+        || reverse.display_name
+        || `${normalizedLatitude.toFixed(6)}, ${normalizedLongitude.toFixed(6)}`;
       setConfirmedAddress(resolvedAddress);
       if (!options?.label) {
         setSelectedLocationLabel(resolvedAddress);
       }
     } catch {
-      const fallbackLabel = `${newLatitude.toFixed(6)}, ${newLongitude.toFixed(6)}`;
+      const fallbackLabel = `${normalizedLatitude.toFixed(6)}, ${normalizedLongitude.toFixed(6)}`;
       setConfirmedAddress(fallbackLabel);
       if (!options?.label) {
         setSelectedLocationLabel(fallbackLabel);
@@ -386,7 +396,7 @@ export function NewScan() {
         radius_km: radiusKm,
         address_hint: addressHint,
       });
-      navigate(`/scans/${result.id}`);
+      navigate(`/scan/${result.id}`);
     } catch (submitError: any) {
       setError(
         submitError?.response?.data?.error

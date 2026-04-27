@@ -83,8 +83,10 @@ export interface WeatherProjection {
   projection_2035?: WeatherProjectionSnapshot | null;
   projection_2040?: WeatherProjectionSnapshot | null;
   projection_2050?: WeatherProjectionSnapshot | null;
-  rainfall_change_2025_to_2050_percent?: number | null;
-  temp_change_2025_to_2050_c?: number | null;
+  projection_2060?: WeatherProjectionSnapshot | null;
+  projection_2075?: WeatherProjectionSnapshot | null;
+  rainfall_change_2025_to_2075_percent?: number | null;
+  temp_change_2025_to_2075_c?: number | null;
   flood_risk_trajectory?: 'worsening' | 'stable' | 'improving' | string;
   model?: string;
 }

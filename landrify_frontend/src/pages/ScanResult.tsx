@@ -108,6 +108,7 @@ export function ScanResult() {
   const { id } = useParams<{ id: string }>();
   const [remarkPlugins, setRemarkPlugins] = useState<any[]>([]);
   const [downloading, setDownloading] = useState(false);
+  const [aiExpanded, setAiExpanded] = useState(false);
 
   useEffect(() => {
     const dynamicImport = new Function('u', 'return import(u)') as (specifier: string) => Promise<any>;
@@ -132,6 +133,7 @@ export function ScanResult() {
     (error as Error | null)?.message;
 
   const weather = useMemo(() => weatherBundle(data), [data]);
+  const hasLongAiReport = (data?.ai_report?.trim().length ?? 0) > 1600;
 
   const handleDownloadPdf = async () => {
     if (!data) return;
@@ -282,13 +284,13 @@ export function ScanResult() {
                 <div className="rounded-2xl border border-landrify-orange/30 bg-landrify-orange/5 p-4">
                   <p className="text-xs uppercase tracking-widest text-gray-500">Long-term signal</p>
                   <p className="mt-2 text-lg font-semibold text-landrify-ink">
-                    {weather.projection?.projection_2050?.avg_annual_rainfall_mm ?? '—'} mm/year
+                    {weather.projection?.projection_2075?.avg_annual_rainfall_mm ?? '—'} mm/year
                   </p>
                   <p className="text-sm text-gray-500">
-                    2050 avg max temp {weather.projection?.projection_2050?.avg_max_temp_c ?? '—'}°C
+                    2075 avg max temp {weather.projection?.projection_2075?.avg_max_temp_c ?? '—'}°C
                   </p>
                   <p className="mt-2 text-xs text-gray-500">
-                    Rainfall change {weather.projection?.rainfall_change_2025_to_2050_percent ?? '—'}%
+                    Rainfall change {weather.projection?.rainfall_change_2025_to_2075_percent ?? '—'}%
                   </p>
                   <p className="text-xs text-gray-500">
                     Flood trajectory {weather.projection?.flood_risk_trajectory ?? '—'}
@@ -296,7 +298,7 @@ export function ScanResult() {
                 </div>
               </div>
 
-              <div className="mt-4 grid gap-4 md:grid-cols-4">
+              <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 <ProjectionCard
                   title="2030 Projection"
                   rainfall={weather.projection?.projection_2030?.avg_annual_rainfall_mm}
@@ -317,6 +319,16 @@ export function ScanResult() {
                   rainfall={weather.projection?.projection_2050?.avg_annual_rainfall_mm}
                   maxTemp={weather.projection?.projection_2050?.avg_max_temp_c}
                 />
+                <ProjectionCard
+                  title="2060 Projection"
+                  rainfall={weather.projection?.projection_2060?.avg_annual_rainfall_mm}
+                  maxTemp={weather.projection?.projection_2060?.avg_max_temp_c}
+                />
+                <ProjectionCard
+                  title="2075 Projection"
+                  rainfall={weather.projection?.projection_2075?.avg_annual_rainfall_mm}
+                  maxTemp={weather.projection?.projection_2075?.avg_max_temp_c}
+                />
               </div>
 
               {weather.summary && <p className="mt-4 text-sm leading-relaxed text-gray-600">{weather.summary}</p>}
@@ -330,34 +342,51 @@ export function ScanResult() {
                 <div className="mb-4 rounded-xl border border-green-100 bg-green-50 px-4 py-3 text-sm text-gray-700">
                   AI report · Model {data.ai_report_model || 'N/A'} · {data.ai_report_tokens ?? 'N/A'} tokens used
                 </div>
-                <article className="prose max-w-none">
-                  <ReactMarkdown
-                    remarkPlugins={remarkPlugins}
-                    components={{
-                      h1: ({ children }) => (
-                        <h1 style={{ color: '#1A7A4A', fontSize: '1.3rem', fontWeight: 700, marginTop: '1.5rem', marginBottom: '0.6rem' }}>
-                          {children}
-                        </h1>
-                      ),
-                      h2: ({ children }) => (
-                        <h2 style={{ color: '#1A7A4A', fontSize: '1.1rem', fontWeight: 700, marginTop: '1.2rem', marginBottom: '0.45rem' }}>
-                          {children}
-                        </h2>
-                      ),
-                      p: ({ children }) => (
-                        <p style={{ color: '#374151', lineHeight: '1.75', marginBottom: '0.85rem' }}>{children}</p>
-                      ),
-                      li: ({ children }) => (
-                        <li style={{ color: '#374151', lineHeight: '1.7', marginBottom: '0.35rem' }}>{children}</li>
-                      ),
-                      strong: ({ children }) => (
-                        <strong style={{ color: '#1A7A4A', fontWeight: 700 }}>{children}</strong>
-                      ),
-                    }}
-                  >
-                    {data.ai_report}
-                  </ReactMarkdown>
-                </article>
+                <div className="relative">
+                  <article className={`prose max-w-none ${aiExpanded || !hasLongAiReport ? '' : 'max-h-[28rem] overflow-hidden'}`}>
+                    <ReactMarkdown
+                      remarkPlugins={remarkPlugins}
+                      components={{
+                        h1: ({ children }) => (
+                          <h1 style={{ color: '#1A7A4A', fontSize: '1.3rem', fontWeight: 700, marginTop: '1.5rem', marginBottom: '0.6rem' }}>
+                            {children}
+                          </h1>
+                        ),
+                        h2: ({ children }) => (
+                          <h2 style={{ color: '#1A7A4A', fontSize: '1.1rem', fontWeight: 700, marginTop: '1.2rem', marginBottom: '0.45rem' }}>
+                            {children}
+                          </h2>
+                        ),
+                        p: ({ children }) => (
+                          <p style={{ color: '#374151', lineHeight: '1.75', marginBottom: '0.85rem' }}>{children}</p>
+                        ),
+                        li: ({ children }) => (
+                          <li style={{ color: '#374151', lineHeight: '1.7', marginBottom: '0.35rem' }}>{children}</li>
+                        ),
+                        strong: ({ children }) => (
+                          <strong style={{ color: '#1A7A4A', fontWeight: 700 }}>{children}</strong>
+                        ),
+                      }}
+                    >
+                      {data.ai_report}
+                    </ReactMarkdown>
+                  </article>
+                  {!aiExpanded && hasLongAiReport && (
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-white via-white/90 to-transparent" />
+                  )}
+                </div>
+                {hasLongAiReport && (
+                  <div className="mt-5 flex">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-2xl"
+                      onClick={() => setAiExpanded((value) => !value)}
+                    >
+                      {aiExpanded ? 'Read Less' : 'Load More'}
+                    </Button>
+                  </div>
+                )}
               </>
             ) : data.upgrade_prompt ? (
               <div className="rounded-2xl border border-landrify-orange/40 bg-landrify-orange/10 p-5">

@@ -6,6 +6,7 @@ import logging
 import math
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
 import requests
@@ -471,6 +472,15 @@ def _weather_description(weather_code: int | None) -> str:
     return WMO_WEATHER_CODES.get(weather_code, 'Unknown conditions')
 
 
+def _future_result(task_name: str, future, default=None):
+    """Resolve a thread-pool future and log failures without aborting the scan."""
+    try:
+        return future.result()
+    except Exception as exc:
+        logger.warning("%s fetch failed: %s", task_name, exc)
+        return default
+
+
 def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     """Calculate the distance between two coordinates in kilometres."""
     earth_radius_km = 6371
@@ -787,27 +797,21 @@ def run_land_scan(scan, full_report: bool = False) -> dict:
 
     scan.satellite_image_url = get_satellite_image_url(lat, lng, radius_km) or ''
 
-    elevation = get_elevation(lat, lng)
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            'elevation': executor.submit(get_elevation, lat, lng),
+            'weather_current': executor.submit(get_current_weather, lat, lng),
+            'weather_historical': executor.submit(get_historical_weather, lat, lng, 10),
+            'weather_projection': executor.submit(get_climate_projection, lat, lng),
+        }
+
+        elevation = _future_result('Elevation', futures['elevation'])
+        weather_current = _future_result('Weather current', futures['weather_current'])
+        weather_historical = _future_result('Weather historical', futures['weather_historical'])
+        weather_projection = _future_result('Weather projection', futures['weather_projection'])
+
     if elevation is not None:
         scan.elevation_meters = elevation
-
-    try:
-        weather_current = get_current_weather(lat, lng)
-    except Exception as exc:
-        logger.warning("Weather current fetch failed: %s", exc)
-        weather_current = None
-
-    try:
-        weather_historical = get_historical_weather(lat, lng, years=10)
-    except Exception as exc:
-        logger.warning("Weather historical fetch failed: %s", exc)
-        weather_historical = None
-
-    try:
-        weather_projection = get_climate_projection(lat, lng)
-    except Exception as exc:
-        logger.warning("Weather projection fetch failed: %s", exc)
-        weather_projection = None
 
     scan.weather_current = weather_current
     scan.weather_historical = weather_historical
@@ -1095,7 +1099,7 @@ def get_climate_projection(lat: float, lng: float) -> dict | None:
             'latitude': lat,
             'longitude': lng,
             'start_date': '2025-01-01',
-            'end_date': '2050-12-31',
+            'end_date': '2075-12-31',
             'models': 'MRI_AGCM3_2_S',
             'daily': 'precipitation_sum,temperature_2m_max,temperature_2m_min',
             'timezone': WEATHER_TIMEZONE,
@@ -1149,18 +1153,19 @@ def get_climate_projection(lat: float, lng: float) -> dict | None:
 
     projection_2025 = _projection_snapshot(2025)
     projection_2050 = _projection_snapshot(2050)
+    projection_2075 = _projection_snapshot(2075)
     rainfall_2025 = projection_2025['avg_annual_rainfall_mm']
-    rainfall_2050 = projection_2050['avg_annual_rainfall_mm']
+    rainfall_2075 = projection_2075['avg_annual_rainfall_mm']
     temp_2025 = projection_2025['avg_max_temp_c']
-    temp_2050 = projection_2050['avg_max_temp_c']
+    temp_2075 = projection_2075['avg_max_temp_c']
 
     rainfall_change_percent = None
-    if rainfall_2025 not in (None, 0) and rainfall_2050 is not None:
-        rainfall_change_percent = round(((rainfall_2050 - rainfall_2025) / rainfall_2025) * 100, 2)
+    if rainfall_2025 not in (None, 0) and rainfall_2075 is not None:
+        rainfall_change_percent = round(((rainfall_2075 - rainfall_2025) / rainfall_2025) * 100, 2)
 
     temp_change_c = None
-    if temp_2025 is not None and temp_2050 is not None:
-        temp_change_c = round(temp_2050 - temp_2025, 2)
+    if temp_2025 is not None and temp_2075 is not None:
+        temp_change_c = round(temp_2075 - temp_2025, 2)
 
     if rainfall_change_percent is None:
         flood_risk_trajectory = 'stable'
@@ -1176,8 +1181,10 @@ def get_climate_projection(lat: float, lng: float) -> dict | None:
         'projection_2035': _projection_snapshot(2035),
         'projection_2040': _projection_snapshot(2040),
         'projection_2050': projection_2050,
-        'rainfall_change_2025_to_2050_percent': rainfall_change_percent,
-        'temp_change_2025_to_2050_c': temp_change_c,
+        'projection_2060': _projection_snapshot(2060),
+        'projection_2075': projection_2075,
+        'rainfall_change_2025_to_2075_percent': rainfall_change_percent,
+        'temp_change_2025_to_2075_c': temp_change_c,
         'flood_risk_trajectory': flood_risk_trajectory,
         'model': 'MRI_AGCM3_2_S',
     }
@@ -1213,12 +1220,12 @@ def summarise_weather(
         )
 
     if projection:
-        projection_2050 = projection.get('projection_2050') or {}
+        projection_2075 = projection.get('projection_2075') or {}
         parts.append(
             (
-                f"Climate projection ({projection.get('model', 'model unavailable')}): 2050 rainfall "
-                f"{projection_2050.get('avg_annual_rainfall_mm', '?')} mm/year, average max temperature "
-                f"{projection_2050.get('avg_max_temp_c', '?')} C, flood trajectory "
+                f"Climate projection ({projection.get('model', 'model unavailable')}): 2075 rainfall "
+                f"{projection_2075.get('avg_annual_rainfall_mm', '?')} mm/year, average max temperature "
+                f"{projection_2075.get('avg_max_temp_c', '?')} C, flood trajectory "
                 f"{projection.get('flood_risk_trajectory', 'stable')}."
             )
         )

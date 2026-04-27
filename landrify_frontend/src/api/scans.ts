@@ -32,7 +32,7 @@ export const geocodeAddress = (q: string, limit = 8) =>
 
 export const reverseGeocode = (lat: number, lng: number) =>
   client
-    .get<{ display_name: string; state: string; lga: string }>(
+    .get<{ address?: string; display_name?: string; state: string; lga: string }>(
       '/api/v1/scans/reverse-geocode/',
       { params: { lat, lng }, headers: { 'X-Skip-Auth': 'true' } },
     )
