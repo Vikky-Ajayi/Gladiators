@@ -76,6 +76,8 @@ export interface WeatherHistorical {
 export interface WeatherProjectionSnapshot {
   avg_annual_rainfall_mm?: number | null;
   avg_max_temp_c?: number | null;
+  basis?: string;
+  years_used?: number[];
 }
 
 export interface WeatherProjection {
@@ -89,6 +91,8 @@ export interface WeatherProjection {
   temp_change_2025_to_2075_c?: number | null;
   flood_risk_trajectory?: 'worsening' | 'stable' | 'improving' | string;
   model?: string;
+  projection_note?: string;
+  source_horizon_end_year?: number | null;
 }
 
 export interface WeatherBundle {

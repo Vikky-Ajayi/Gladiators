@@ -11,6 +11,8 @@ import { ScanResult } from './pages/ScanResult';
 import { HowItWorks } from './pages/HowItWorks';
 import { Pricing } from './pages/Pricing';
 import { About } from './pages/About';
+import { Blog } from './pages/Blog';
+import { BlogArticle } from './pages/BlogArticle';
 import { ScansHistory } from './pages/ScansHistory';
 import { PaymentCheckout } from './pages/PaymentCheckout';
 import { PaymentCallback } from './pages/PaymentCallback';
@@ -45,6 +47,8 @@ export default function App() {
             <Route path="/how-it-works" element={<HowItWorks />} />
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/about" element={<About />} />
+            <Route path="/blog" element={<Blog />} />
+            <Route path="/blog/:slug" element={<BlogArticle />} />
             <Route 
               path="/dashboard" 
               element={

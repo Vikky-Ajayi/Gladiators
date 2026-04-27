@@ -20,6 +20,7 @@
   html, body {
     overflow-x: hidden;
     max-width: 100vw;
+    -webkit-text-size-adjust: 100%;
   }
   body {
     @apply font-sans bg-landrify-bg text-landrify-ink antialiased;
@@ -32,6 +33,14 @@
     @apply font-serif tracking-tight;
   }
   img, video, canvas, svg { max-width: 100%; height: auto; }
+  button, a, input, select, textarea {
+    touch-action: manipulation;
+  }
+  @media (max-width: 767px) {
+    input, select, textarea {
+      font-size: 16px !important;
+    }
+  }
 }
 
 @layer components {
@@ -40,11 +49,11 @@
   }
   
   .btn-primary {
-    @apply bg-landrify-green text-white px-8 py-3 rounded-full font-medium transition-all hover:bg-landrify-green-dark hover:shadow-lg active:scale-95 disabled:opacity-50;
+    @apply bg-landrify-green text-white px-8 py-3 rounded-full font-medium transition-all hover:bg-landrify-green-dark hover:shadow-lg active:translate-y-px disabled:opacity-50;
   }
   
   .btn-outline {
-    @apply border border-landrify-green text-landrify-green px-8 py-3 rounded-full font-medium transition-all hover:bg-landrify-green/5 active:scale-95;
+    @apply border border-landrify-green text-landrify-green px-8 py-3 rounded-full font-medium transition-all hover:bg-landrify-green/5 active:translate-y-px;
   }
 
   .data-value {

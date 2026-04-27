@@ -102,19 +102,24 @@ class GeocodeServiceTests(SimpleTestCase):
                     '2030-01-01',
                     '2035-01-01',
                     '2040-01-01',
+                    '2046-01-01',
+                    '2047-01-01',
+                    '2048-01-01',
+                    '2049-01-01',
                     '2050-01-01',
-                    '2060-01-01',
-                    '2075-01-01',
                 ],
-                'precipitation_sum': [1000, 1100, 1150, 1200, 1300, 1400, 1500],
-                'temperature_2m_max': [30, 31, 31.5, 32, 33, 34, 35],
+                'precipitation_sum': [1000, 1100, 1150, 1200, 1250, 1260, 1270, 1280, 1290],
+                'temperature_2m_max': [30, 31, 31.5, 32, 32.8, 32.9, 33.0, 33.1, 33.2],
             }
         }
 
         result = get_climate_projection(6.4698, 3.5852)
 
         self.assertIsNotNone(result)
-        self.assertEqual(result['projection_2075']['avg_annual_rainfall_mm'], 1500.0)
-        self.assertEqual(result['projection_2060']['avg_max_temp_c'], 34.0)
-        self.assertEqual(result['rainfall_change_2025_to_2075_percent'], 50.0)
-        self.assertEqual(result['temp_change_2025_to_2075_c'], 5.0)
+        self.assertEqual(result['projection_2030']['avg_annual_rainfall_mm'], 1100.0)
+        self.assertEqual(result['projection_2050']['avg_annual_rainfall_mm'], 1270.0)
+        self.assertEqual(result['projection_2060']['avg_max_temp_c'], 34.2)
+        self.assertEqual(result['projection_2075']['avg_annual_rainfall_mm'], 1540.0)
+        self.assertEqual(result['rainfall_change_2025_to_2075_percent'], 54.0)
+        self.assertEqual(result['temp_change_2025_to_2075_c'], 6.0)
+        self.assertEqual(result['source_horizon_end_year'], 2050)

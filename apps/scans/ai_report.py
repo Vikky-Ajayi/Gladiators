@@ -50,6 +50,7 @@ def build_analysis_prompt(scan_data: dict) -> str:
     projection_2050 = projection.get('projection_2050') or {}
     projection_2060 = projection.get('projection_2060') or {}
     projection_2075 = projection.get('projection_2075') or {}
+    projection_note = scan_data.get('weather_projection', {}).get('projection_note') or 'Not provided'
 
     address = scan_data.get('address') or scan_data.get('address_hint') or 'Unknown location'
     address_hint = scan_data.get('address_hint') or 'None provided'
@@ -94,6 +95,7 @@ Temperature trend: {_display_value(historical.get('temp_trend'))}
 Extreme rain days (>50mm) per year: {_display_value(historical.get('extreme_rain_days_per_year'))}
 
 CLIMATE PROJECTIONS (MRI_AGCM3_2_S CMIP6 model)
+Projection basis note: {projection_note}
 2030: {_display_value(projection_2030.get('avg_annual_rainfall_mm'))}mm/year avg rainfall, {_display_value(projection_2030.get('avg_max_temp_c'))}C avg max temp
 2035: {_display_value(projection_2035.get('avg_annual_rainfall_mm'))}mm/year avg rainfall, {_display_value(projection_2035.get('avg_max_temp_c'))}C avg max temp
 2040: {_display_value(projection_2040.get('avg_annual_rainfall_mm'))}mm/year avg rainfall, {_display_value(projection_2040.get('avg_max_temp_c'))}C avg max temp

@@ -3,7 +3,7 @@ import { Button } from './ui/Button';
 import { useAuth } from '../hooks/useAuth';
 import {
   ShieldCheck, Menu, X, LayoutDashboard, LogOut, Info, CreditCard,
-  UserPlus, LogIn, User as UserIcon, BadgeCheck,
+  UserPlus, LogIn, User as UserIcon, BadgeCheck, BookOpen,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -34,6 +34,7 @@ export function Navbar() {
             <div className="hidden md:flex items-center space-x-8">
               <Link to="/how-it-works" className="text-sm font-medium text-gray-600 hover:text-landrify-green transition-colors">How it Works</Link>
               <Link to="/pricing" className="text-sm font-medium text-gray-600 hover:text-landrify-green transition-colors">Pricing</Link>
+              <Link to="/blog" className="text-sm font-medium text-gray-600 hover:text-landrify-green transition-colors">Blog</Link>
               <Link to="/about" className="text-sm font-medium text-gray-600 hover:text-landrify-green transition-colors">About</Link>
 
               {isAuthenticated ? (
@@ -46,7 +47,7 @@ export function Navbar() {
                   <button
                     onClick={() => setProfileOpen(true)}
                     aria-label="Open profile"
-                    className="relative w-10 h-10 rounded-full bg-landrify-green text-white flex items-center justify-center font-bold hover:scale-105 active:scale-95 transition-transform shadow-md"
+                    className="relative w-10 h-10 rounded-full bg-landrify-green text-white flex items-center justify-center font-bold hover:scale-105 active:translate-y-px transition-transform shadow-md"
                   >
                     {initial}
                     {user?.nin_verified && (
@@ -89,7 +90,7 @@ export function Navbar() {
                   </button>
                 </>
               )}
-              <button onClick={() => setIsOpen(!isOpen)} className="p-2 text-gray-600 transition-transform active:scale-90">
+              <button onClick={() => setIsOpen(!isOpen)} className="p-2 text-gray-600 transition-transform active:translate-y-px">
                 {isOpen ? <X strokeWidth={1.5} /> : <Menu strokeWidth={1.5} />}
               </button>
             </div>
@@ -113,6 +114,10 @@ export function Navbar() {
                 <Link to="/pricing" className="flex items-center space-x-3 p-4 rounded-2xl hover:bg-gray-50 text-gray-600 transition-colors">
                   <CreditCard size={20} strokeWidth={1.5} />
                   <span className="text-lg font-medium">Pricing</span>
+                </Link>
+                <Link to="/blog" className="flex items-center space-x-3 p-4 rounded-2xl hover:bg-gray-50 text-gray-600 transition-colors">
+                  <BookOpen size={20} strokeWidth={1.5} />
+                  <span className="text-lg font-medium">Blog</span>
                 </Link>
                 <Link to="/about" className="flex items-center space-x-3 p-4 rounded-2xl hover:bg-gray-50 text-gray-600 transition-colors">
                   <ShieldCheck size={20} strokeWidth={1.5} />

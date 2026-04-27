@@ -3,6 +3,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from .models import LandScan
@@ -278,6 +279,8 @@ class ForwardGeocodeView(APIView):
     """
     permission_classes = [AllowAny]
     authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'geocode'
 
     def get(self, request):
         q = (request.query_params.get('q') or '').strip()
@@ -298,6 +301,8 @@ class ReverseGeocodeView(APIView):
     """GET /api/v1/scans/reverse-geocode/?lat=...&lng=..."""
     permission_classes = [AllowAny]
     authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'geocode'
 
     def get(self, request):
         try:

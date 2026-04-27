@@ -37,6 +37,7 @@ OPEN_METEO_ELEVATION_URL = 'https://api.open-meteo.com/v1/elevation'
 OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
 OPEN_METEO_ARCHIVE_URL = 'https://archive-api.open-meteo.com/v1/archive'
 OPEN_METEO_CLIMATE_URL = 'https://climate-api.open-meteo.com/v1/climate'
+OPEN_METEO_CLIMATE_HORIZON_END = date(2050, 1, 1)
 MAPBOX_STATIC_URL_TEMPLATE = (
     'https://api.mapbox.com/styles/v1/mapbox/satellite-v9/static/'
     '{lng},{lat},{zoom}/600x400@2x?access_token={token}'
@@ -479,6 +480,58 @@ def _future_result(task_name: str, future, default=None):
     except Exception as exc:
         logger.warning("%s fetch failed: %s", task_name, exc)
         return default
+
+
+def _projection_snapshot_from_years(
+    per_year: dict[int, dict[str, list | float]],
+    years: list[int],
+    *,
+    basis: str,
+) -> dict:
+    """Summarise rainfall and temperature across one or more yearly buckets."""
+    available_years = [year for year in years if year in per_year]
+    if not available_years:
+        return {
+            'avg_annual_rainfall_mm': None,
+            'avg_max_temp_c': None,
+            'basis': basis,
+            'years_used': [],
+        }
+
+    rainfall_totals = [float(per_year[year]['rainfall_total']) for year in available_years]
+    max_temp_values = [
+        yearly_average
+        for year in available_years
+        for yearly_average in [_average(per_year[year]['max_temps'])]  # type: ignore[arg-type]
+        if yearly_average is not None
+    ]
+    return {
+        'avg_annual_rainfall_mm': _round_or_none(_average(rainfall_totals)),
+        'avg_max_temp_c': _round_or_none(_average(max_temp_values)),
+        'basis': basis,
+        'years_used': available_years,
+    }
+
+
+def _extrapolate_projection_value(
+    start_year: int,
+    start_value: float | None,
+    end_year: int,
+    end_value: float | None,
+    target_year: int,
+) -> float | None:
+    """Linearly extend a climate signal to a later target year."""
+    if start_value is None and end_value is None:
+        return None
+    if start_value is None:
+        return _round_or_none(end_value)
+    if end_value is None:
+        return _round_or_none(start_value)
+    if end_year == start_year:
+        return _round_or_none(end_value)
+
+    annual_delta = (end_value - start_value) / (end_year - start_year)
+    return _round_or_none(end_value + annual_delta * (target_year - end_year))
 
 
 def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -1099,7 +1152,7 @@ def get_climate_projection(lat: float, lng: float) -> dict | None:
             'latitude': lat,
             'longitude': lng,
             'start_date': '2025-01-01',
-            'end_date': '2075-12-31',
+            'end_date': OPEN_METEO_CLIMATE_HORIZON_END.isoformat(),
             'models': 'MRI_AGCM3_2_S',
             'daily': 'precipitation_sum,temperature_2m_max,temperature_2m_min',
             'timezone': WEATHER_TIMEZONE,
@@ -1142,21 +1195,35 @@ def get_climate_projection(lat: float, lng: float) -> dict | None:
         if max_temp is not None:
             bucket['max_temps'].append(max_temp)
 
-    def _projection_snapshot(target_year: int) -> dict:
-        bucket = per_year.get(target_year) or {}
-        return {
-            'avg_annual_rainfall_mm': round(float(bucket.get('rainfall_total', 0.0)), 2)
-            if bucket
-            else None,
-            'avg_max_temp_c': _round_or_none(_average(bucket.get('max_temps', []))),  # type: ignore[arg-type]
-        }
+    projection_2025 = _projection_snapshot_from_years(per_year, [2025], basis='model')
+    projection_2030 = _projection_snapshot_from_years(per_year, [2030], basis='model')
+    projection_2035 = _projection_snapshot_from_years(per_year, [2035], basis='model')
+    projection_2040 = _projection_snapshot_from_years(per_year, [2040], basis='model')
+    projection_2050 = _projection_snapshot_from_years(
+        per_year,
+        [2046, 2047, 2048, 2049, 2050],
+        basis='model_trailing_window',
+    )
 
-    projection_2025 = _projection_snapshot(2025)
-    projection_2050 = _projection_snapshot(2050)
-    projection_2075 = _projection_snapshot(2075)
     rainfall_2025 = projection_2025['avg_annual_rainfall_mm']
-    rainfall_2075 = projection_2075['avg_annual_rainfall_mm']
+    rainfall_2050 = projection_2050['avg_annual_rainfall_mm']
     temp_2025 = projection_2025['avg_max_temp_c']
+    temp_2050 = projection_2050['avg_max_temp_c']
+
+    projection_2060 = {
+        'avg_annual_rainfall_mm': _extrapolate_projection_value(2025, rainfall_2025, 2050, rainfall_2050, 2060),
+        'avg_max_temp_c': _extrapolate_projection_value(2025, temp_2025, 2050, temp_2050, 2060),
+        'basis': 'trend_extension',
+        'years_used': [2025, 2050],
+    }
+    projection_2075 = {
+        'avg_annual_rainfall_mm': _extrapolate_projection_value(2025, rainfall_2025, 2050, rainfall_2050, 2075),
+        'avg_max_temp_c': _extrapolate_projection_value(2025, temp_2025, 2050, temp_2050, 2075),
+        'basis': 'trend_extension',
+        'years_used': [2025, 2050],
+    }
+
+    rainfall_2075 = projection_2075['avg_annual_rainfall_mm']
     temp_2075 = projection_2075['avg_max_temp_c']
 
     rainfall_change_percent = None
@@ -1177,16 +1244,22 @@ def get_climate_projection(lat: float, lng: float) -> dict | None:
         flood_risk_trajectory = 'stable'
 
     return {
-        'projection_2030': _projection_snapshot(2030),
-        'projection_2035': _projection_snapshot(2035),
-        'projection_2040': _projection_snapshot(2040),
+        'projection_2030': projection_2030,
+        'projection_2035': projection_2035,
+        'projection_2040': projection_2040,
         'projection_2050': projection_2050,
-        'projection_2060': _projection_snapshot(2060),
+        'projection_2060': projection_2060,
         'projection_2075': projection_2075,
         'rainfall_change_2025_to_2075_percent': rainfall_change_percent,
         'temp_change_2025_to_2075_c': temp_change_c,
         'flood_risk_trajectory': flood_risk_trajectory,
         'model': 'MRI_AGCM3_2_S',
+        'projection_note': (
+            '2030-2050 values come from the Open-Meteo MRI_AGCM3_2_S climate model '
+            'available through 2050-01-01. 2060 and 2075 are trend-extended estimates '
+            'derived from the 2025-2050 signal.'
+        ),
+        'source_horizon_end_year': OPEN_METEO_CLIMATE_HORIZON_END.year,
     }
 
 
@@ -1229,5 +1302,8 @@ def summarise_weather(
                 f"{projection.get('flood_risk_trajectory', 'stable')}."
             )
         )
+        projection_note = projection.get('projection_note')
+        if projection_note:
+            parts.append(str(projection_note))
 
     return ' '.join(parts)

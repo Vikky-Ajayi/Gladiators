@@ -185,7 +185,9 @@ export function NewScan() {
   const [addressQuery, setAddressQuery] = useState('');
   const [addressResults, setAddressResults] = useState<GeocodeResult[]>([]);
   const [addressSearching, setAddressSearching] = useState(false);
+  const [addressSelectionLocked, setAddressSelectionLocked] = useState(false);
   const addressDebounceRef = useRef<number | null>(null);
+  const addressInputRef = useRef<HTMLInputElement | null>(null);
 
   const [sharedLocationInput, setSharedLocationInput] = useState('');
   const [manualLatitude, setManualLatitude] = useState('');
@@ -216,7 +218,7 @@ export function NewScan() {
     if (addressDebounceRef.current) window.clearTimeout(addressDebounceRef.current);
 
     const query = addressQuery.trim();
-    if (query.length < 3) {
+    if (addressSelectionLocked || query.length < 3) {
       setAddressResults([]);
       setAddressSearching(false);
       return;
@@ -237,7 +239,14 @@ export function NewScan() {
     return () => {
       if (addressDebounceRef.current) window.clearTimeout(addressDebounceRef.current);
     };
-  }, [activeTab, addressQuery]);
+  }, [activeTab, addressQuery, addressSelectionLocked]);
+
+  useEffect(() => {
+    if (activeTab !== 'address') {
+      setAddressSelectionLocked(false);
+      setAddressResults([]);
+    }
+  }, [activeTab]);
 
   const applyCoordinates = async (
     newLatitude: number,
@@ -284,8 +293,16 @@ export function NewScan() {
   };
 
   const handleAddressPick = async (result: GeocodeResult) => {
+    if (addressDebounceRef.current) {
+      window.clearTimeout(addressDebounceRef.current);
+      addressDebounceRef.current = null;
+    }
+    setAddressSelectionLocked(true);
+    setAddressSearching(false);
     setAddressQuery(result.label);
     setAddressResults([]);
+    setError(null);
+    addressInputRef.current?.blur();
     await applyCoordinates(result.latitude, result.longitude, {
       label: result.label,
       address: result.label,
@@ -474,8 +491,12 @@ export function NewScan() {
                   <div className="relative">
                     <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
                     <Input
+                      ref={addressInputRef}
                       value={addressQuery}
-                      onChange={(event) => setAddressQuery(event.target.value)}
+                      onChange={(event) => {
+                        setAddressSelectionLocked(false);
+                        setAddressQuery(event.target.value);
+                      }}
                       placeholder="Search any Nigerian address, landmark, town, LGA, or state"
                       className="h-12 pl-12"
                     />
@@ -490,7 +511,10 @@ export function NewScan() {
                         <button
                           key={`${result.place_id ?? `${result.latitude}-${result.longitude}`}`}
                           type="button"
-                          onClick={() => void handleAddressPick(result)}
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            void handleAddressPick(result);
+                          }}
                           className="flex w-full items-start gap-3 border-b border-gray-100 px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-emerald-50/60"
                         >
                           <MapPin className="mt-1 h-4 w-4 flex-shrink-0 text-landrify-green" />

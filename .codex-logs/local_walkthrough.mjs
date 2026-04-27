@@ -3,8 +3,8 @@ import path from 'node:path';
 
 const { chromium } = await import('file:///C:/Users/VICTORIA/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs');
 
-const frontendUrl = 'http://127.0.0.1:5000';
-const apiBaseUrl = 'http://127.0.0.1:8000';
+const frontendUrl = process.env.LANDRIFY_FRONTEND_URL || 'http://127.0.0.1:5000';
+const apiBaseUrl = process.env.LANDRIFY_API_BASE_URL || 'http://127.0.0.1:8000';
 const outputDir = 'C:/Users/VICTORIA/Desktop/Gladiators/.codex-logs';
 
 async function ensureDir(dir) {
@@ -75,18 +75,44 @@ const context = await browser.newContext({
 });
 
 await context.grantPermissions(['geolocation'], { origin: frontendUrl });
-await context.addInitScript((token) => {
+await context.addInitScript(({ token, apiBaseUrl }) => {
   window.localStorage.setItem('landrify_token', token);
-}, auth.token);
+
+  const defaultApiBaseUrl = 'http://127.0.0.1:8000';
+  const rewriteUrl = (input) => {
+    if (typeof input === 'string' && input.startsWith(defaultApiBaseUrl)) {
+      return input.replace(defaultApiBaseUrl, apiBaseUrl);
+    }
+    if (input instanceof Request && typeof input.url === 'string' && input.url.startsWith(defaultApiBaseUrl)) {
+      return new Request(input.url.replace(defaultApiBaseUrl, apiBaseUrl), input);
+    }
+    return input;
+  };
+
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = (input, init) => originalFetch(rewriteUrl(input), init);
+
+  const originalOpen = window.XMLHttpRequest.prototype.open;
+  window.XMLHttpRequest.prototype.open = function patchedOpen(method, url, ...rest) {
+    const rewrittenUrl =
+      typeof url === 'string' && url.startsWith(defaultApiBaseUrl)
+        ? url.replace(defaultApiBaseUrl, apiBaseUrl)
+        : url;
+    return originalOpen.call(this, method, rewrittenUrl, ...rest);
+  };
+}, { token: auth.token, apiBaseUrl });
 
 const page = await context.newPage();
 const summary = {
   addressPreview: false,
+  addressDropdownClosed: false,
   manualPreview: false,
   gpsPreview: false,
   mapPickPreview: false,
   scanRedirect: false,
   aiExpandCollapse: false,
+  weatherProjectionVisible: false,
+  mobilePreview: false,
   screenshots: {},
 };
 
@@ -110,6 +136,7 @@ try {
   await page.waitForSelector('text=Selected address:', { timeout: 10000 });
   await page.waitForSelector('text=scan radius 50 m', { timeout: 10000 });
   summary.addressPreview = true;
+  summary.addressDropdownClosed = (await page.locator('.max-h-80 button').count()) === 0;
   summary.screenshots.address = await takeScreenshot(page, 'walkthrough-address-preview.png');
 
   await page.getByRole('button', { name: 'Coordinates' }).click();
@@ -159,6 +186,13 @@ try {
     summary.scanDurationMs = Date.now() - scanStart;
     summary.resultUrl = page.url();
     summary.screenshots.result = await takeScreenshot(page, 'walkthrough-scan-result.png');
+
+    await page.waitForSelector('text=Weather & Climate', { timeout: 30000 });
+    const climateSectionText = await page.locator('body').innerText();
+    summary.weatherProjectionVisible =
+      climateSectionText.includes('2030 Projection')
+      && climateSectionText.includes('2075 Projection')
+      && !climateSectionText.includes('2030 Projection\n— mm/year');
   }
 
   const loadMore = page.getByRole('button', { name: 'Load More' });
@@ -169,6 +203,53 @@ try {
     await page.waitForSelector('text=Load More', { timeout: 10000 });
     summary.aiExpandCollapse = true;
   }
+
+  const mobileContext = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    geolocation: { latitude: 6.4698, longitude: 3.5852 },
+    isMobile: true,
+    hasTouch: true,
+    colorScheme: 'light',
+  });
+  await mobileContext.grantPermissions(['geolocation'], { origin: frontendUrl });
+  await mobileContext.addInitScript(({ token, apiBaseUrl }) => {
+    window.localStorage.setItem('landrify_token', token);
+    const defaultApiBaseUrl = 'http://127.0.0.1:8000';
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      if (typeof input === 'string' && input.startsWith(defaultApiBaseUrl)) {
+        return originalFetch(input.replace(defaultApiBaseUrl, apiBaseUrl), init);
+      }
+      if (input instanceof Request && typeof input.url === 'string' && input.url.startsWith(defaultApiBaseUrl)) {
+        return originalFetch(new Request(input.url.replace(defaultApiBaseUrl, apiBaseUrl), input), init);
+      }
+      return originalFetch(input, init);
+    };
+    const originalOpen = window.XMLHttpRequest.prototype.open;
+    window.XMLHttpRequest.prototype.open = function patchedOpen(method, url, ...rest) {
+      const rewrittenUrl =
+        typeof url === 'string' && url.startsWith(defaultApiBaseUrl)
+          ? url.replace(defaultApiBaseUrl, apiBaseUrl)
+          : url;
+      return originalOpen.call(this, method, rewrittenUrl, ...rest);
+    };
+  }, { token: auth.token, apiBaseUrl });
+  const mobilePage = await mobileContext.newPage();
+  await mobilePage.goto(frontendUrl, { waitUntil: 'networkidle' });
+  await mobilePage.evaluate(() => {
+    window.history.pushState({}, '', '/scan/new');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await mobilePage.waitForTimeout(1200);
+  const mobileAddressInput = mobilePage.getByPlaceholder('Search any Nigerian address, landmark, town, LGA, or state');
+  await mobileAddressInput.fill('Lekki Phase 1');
+  await mobilePage.waitForSelector('.max-h-80 button', { timeout: 20000 });
+  await mobilePage.locator('.max-h-80 button').first().click();
+  await mobilePage.waitForSelector('text=Selected address:', { timeout: 10000 });
+  summary.mobilePreview = true;
+  summary.screenshots.mobile = await takeScreenshot(mobilePage, 'walkthrough-mobile-preview.png');
+  await mobileContext.close();
+
   console.log(JSON.stringify(summary, null, 2));
 } catch (error) {
   summary.error = {

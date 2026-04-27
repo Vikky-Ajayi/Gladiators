@@ -336,7 +336,7 @@ function CardScreen({
                 placeholder="Card Number"
                 inputMode="numeric"
                 autoComplete="cc-number"
-                className="w-full pl-10 pr-3 py-3 border border-slate-300 rounded text-[14px] focus:border-[#1786C5] focus:ring-2 focus:ring-[#1786C5]/15 outline-none placeholder:text-slate-400"
+                className="w-full pl-10 pr-3 py-3 border border-slate-300 rounded text-base md:text-[14px] focus:border-[#1786C5] focus:ring-2 focus:ring-[#1786C5]/15 outline-none placeholder:text-slate-400"
               />
             </div>
 
@@ -355,7 +355,7 @@ function CardScreen({
                   placeholder="MM / YY"
                   inputMode="numeric"
                   autoComplete="cc-exp"
-                  className="w-full pl-10 pr-3 py-3 border border-slate-300 rounded text-[14px] focus:border-[#1786C5] focus:ring-2 focus:ring-[#1786C5]/15 outline-none placeholder:text-slate-400"
+                  className="w-full pl-10 pr-3 py-3 border border-slate-300 rounded text-base md:text-[14px] focus:border-[#1786C5] focus:ring-2 focus:ring-[#1786C5]/15 outline-none placeholder:text-slate-400"
                 />
               </div>
               <div className="relative">
@@ -367,7 +367,7 @@ function CardScreen({
                   type="password"
                   inputMode="numeric"
                   autoComplete="cc-csc"
-                  className="w-full pl-10 pr-3 py-3 border border-slate-300 rounded text-[14px] focus:border-[#1786C5] focus:ring-2 focus:ring-[#1786C5]/15 outline-none placeholder:text-slate-400"
+                  className="w-full pl-10 pr-3 py-3 border border-slate-300 rounded text-base md:text-[14px] focus:border-[#1786C5] focus:ring-2 focus:ring-[#1786C5]/15 outline-none placeholder:text-slate-400"
                 />
               </div>
             </div>

@@ -88,10 +88,12 @@ function ProjectionCard({
   title,
   rainfall,
   maxTemp,
+  basis,
 }: {
   title: string;
   rainfall?: number | null;
   maxTemp?: number | null;
+  basis?: string;
 }) {
   return (
     <div className="rounded-2xl border border-landrify-line p-4">
@@ -100,6 +102,12 @@ function ProjectionCard({
         {rainfall ?? '—'} mm/year
       </p>
       <p className="text-sm text-gray-500">Avg max temp: {maxTemp ?? '—'}°C</p>
+      {basis === 'trend_extension' && (
+        <p className="mt-2 text-[11px] text-gray-500">Trend-extended estimate</p>
+      )}
+      {basis === 'model_trailing_window' && (
+        <p className="mt-2 text-[11px] text-gray-500">Model window ending at 2050</p>
+      )}
     </div>
   );
 }
@@ -303,34 +311,45 @@ export function ScanResult() {
                   title="2030 Projection"
                   rainfall={weather.projection?.projection_2030?.avg_annual_rainfall_mm}
                   maxTemp={weather.projection?.projection_2030?.avg_max_temp_c}
+                  basis={weather.projection?.projection_2030?.basis}
                 />
                 <ProjectionCard
                   title="2035 Projection"
                   rainfall={weather.projection?.projection_2035?.avg_annual_rainfall_mm}
                   maxTemp={weather.projection?.projection_2035?.avg_max_temp_c}
+                  basis={weather.projection?.projection_2035?.basis}
                 />
                 <ProjectionCard
                   title="2040 Projection"
                   rainfall={weather.projection?.projection_2040?.avg_annual_rainfall_mm}
                   maxTemp={weather.projection?.projection_2040?.avg_max_temp_c}
+                  basis={weather.projection?.projection_2040?.basis}
                 />
                 <ProjectionCard
                   title="2050 Projection"
                   rainfall={weather.projection?.projection_2050?.avg_annual_rainfall_mm}
                   maxTemp={weather.projection?.projection_2050?.avg_max_temp_c}
+                  basis={weather.projection?.projection_2050?.basis}
                 />
                 <ProjectionCard
                   title="2060 Projection"
                   rainfall={weather.projection?.projection_2060?.avg_annual_rainfall_mm}
                   maxTemp={weather.projection?.projection_2060?.avg_max_temp_c}
+                  basis={weather.projection?.projection_2060?.basis}
                 />
                 <ProjectionCard
                   title="2075 Projection"
                   rainfall={weather.projection?.projection_2075?.avg_annual_rainfall_mm}
                   maxTemp={weather.projection?.projection_2075?.avg_max_temp_c}
+                  basis={weather.projection?.projection_2075?.basis}
                 />
               </div>
 
+              {weather.projection?.projection_note && (
+                <p className="mt-4 text-xs leading-relaxed text-gray-500">
+                  {weather.projection.projection_note}
+                </p>
+              )}
               {weather.summary && <p className="mt-4 text-sm leading-relaxed text-gray-600">{weather.summary}</p>}
             </section>
           )}

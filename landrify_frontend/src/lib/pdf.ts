@@ -246,6 +246,7 @@ function weatherPage(doc: any, scan: ScanResult) {
       ['2075', `${weather.projection?.projection_2075?.avg_annual_rainfall_mm ?? '—'} mm/year · ${weather.projection?.projection_2075?.avg_max_temp_c ?? '—'} °C`],
       ['Rainfall Change to 2075', `${weather.projection?.rainfall_change_2025_to_2075_percent ?? '—'} %`],
       ['Flood Trajectory', weather.projection?.flood_risk_trajectory || '—'],
+      ['Projection Basis', weather.projection?.projection_note || '—'],
     ],
     cursor + 12,
   );

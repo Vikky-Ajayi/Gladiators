@@ -265,7 +265,7 @@ export function Home() {
               Join thousands of smart investors who use Landrify to verify their real estate acquisitions in Nigeria.
             </p>
             <Link to="/register">
-              <Button className="bg-white text-landrify-green-dark hover:bg-gray-100 h-12 px-8 text-base shadow-xl rounded-full transition-transform active:scale-95">
+              <Button className="bg-white text-landrify-green-dark hover:bg-gray-100 h-12 px-8 text-base shadow-xl rounded-full transition-transform active:translate-y-px">
                 Get Started Now
               </Button>
             </Link>
