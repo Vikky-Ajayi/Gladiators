@@ -388,7 +388,12 @@ export function NewScan() {
       });
       navigate(`/scans/${result.id}`);
     } catch (submitError: any) {
-      setError(submitError?.response?.data?.error || submitError?.response?.data?.detail || 'Failed to create scan.');
+      setError(
+        submitError?.response?.data?.error
+        || submitError?.response?.data?.detail
+        || submitError?.userMessage
+        || 'Failed to create scan.',
+      );
     } finally {
       setLoading(false);
     }

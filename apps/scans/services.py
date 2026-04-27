@@ -29,6 +29,8 @@ NOMINATIM_HEADERS = {
 }
 NOMINATIM_REVERSE_URL = 'https://nominatim.openstreetmap.org/reverse'
 NOMINATIM_SEARCH_URL = 'https://nominatim.openstreetmap.org/search'
+MAPBOX_GEOCODE_FORWARD_URL = 'https://api.mapbox.com/search/geocode/v6/forward'
+MAPBOX_GEOCODE_REVERSE_URL = 'https://api.mapbox.com/search/geocode/v6/reverse'
 OPEN_ELEVATION_URL = 'https://api.open-elevation.com/api/v1/lookup'
 OPEN_METEO_ELEVATION_URL = 'https://api.open-meteo.com/v1/elevation'
 OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
@@ -201,6 +203,200 @@ def _extract_lga(address_data: dict) -> str:
     )
 
 
+def _get_mapbox_token() -> str:
+    """Return the configured Mapbox token when available."""
+    return (getattr(settings, 'MAPBOX_TOKEN', '') or '').strip()
+
+
+def _mapbox_context_name(context: dict, key: str) -> str:
+    """Extract a named context object from a Mapbox feature."""
+    value = context.get(key) or {}
+    if isinstance(value, dict):
+        return (value.get('name') or '').strip()
+    return ''
+
+
+def _extract_mapbox_lga(context: dict) -> str:
+    """Best-effort LGA extraction from Mapbox context objects."""
+    place_context = context.get('place') or {}
+    alternate = place_context.get('alternate') or {}
+    candidates = [
+        alternate.get('name'),
+        _mapbox_context_name(context, 'district'),
+        _mapbox_context_name(context, 'locality'),
+        _mapbox_context_name(context, 'neighborhood'),
+        place_context.get('name'),
+    ]
+    for candidate in candidates:
+        if candidate:
+            return str(candidate).strip()
+    return ''
+
+
+def _dedupe_geocode_results(results: list[dict], limit: int) -> list[dict]:
+    """Deduplicate geocode results while preserving order."""
+    seen: set[tuple[str, str, str]] = set()
+    deduped: list[dict] = []
+    for item in results:
+        key = (
+            str(item.get('label') or '').strip().lower(),
+            f"{float(item.get('latitude')):.6f}",
+            f"{float(item.get('longitude')):.6f}",
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
+def _mapbox_forward_geocode(query: str, limit: int) -> list[dict]:
+    """Forward geocode with Mapbox Geocoding v6 when a token is configured."""
+    token = _get_mapbox_token()
+    if not token:
+        return []
+
+    data = _request_json(
+        'GET',
+        MAPBOX_GEOCODE_FORWARD_URL,
+        service_name='Mapbox forward geocode',
+        params={
+            'q': query,
+            'country': 'NG',
+            'language': 'en',
+            'limit': limit,
+            'autocomplete': 'true',
+            'access_token': token,
+        },
+        timeout=10,
+    )
+    if not isinstance(data, dict):
+        return []
+
+    features = data.get('features') or []
+    results: list[dict] = []
+    for feature in features:
+        geometry = feature.get('geometry') or {}
+        coordinates = geometry.get('coordinates') or []
+        if len(coordinates) < 2:
+            continue
+
+        lng = _safe_float(coordinates[0])
+        lat = _safe_float(coordinates[1])
+        if lat is None or lng is None or not _is_within_nigeria(lat, lng):
+            continue
+
+        properties = feature.get('properties') or {}
+        context = properties.get('context') or {}
+        label = (
+            properties.get('full_address')
+            or ', '.join(
+                [part for part in (properties.get('name'), properties.get('place_formatted')) if part]
+            )
+            or f'{lat}, {lng}'
+        )
+        results.append(
+            {
+                'label': label,
+                'latitude': round(lat, 8),
+                'longitude': round(lng, 8),
+                'type': properties.get('feature_type', ''),
+                'state': _normalise_state(_mapbox_context_name(context, 'region')),
+                'lga': _extract_mapbox_lga(context),
+                'place_id': properties.get('mapbox_id') or feature.get('id') or '',
+            }
+        )
+    return results
+
+
+def _nominatim_forward_geocode(query: str, limit: int) -> list[dict]:
+    """Fallback forward geocoder using Nominatim."""
+    time.sleep(NOMINATIM_DELAY_SECONDS)
+    data = _request_json(
+        'GET',
+        NOMINATIM_SEARCH_URL,
+        service_name='Nominatim forward geocode',
+        params={
+            'q': query,
+            'countrycodes': 'ng',
+            'format': 'json',
+            'addressdetails': 1,
+            'limit': limit,
+        },
+        headers=NOMINATIM_HEADERS,
+        timeout=10,
+    )
+    if not isinstance(data, list):
+        return []
+
+    results = []
+    for item in data:
+        lat = _safe_float(item.get('lat'))
+        lng = _safe_float(item.get('lon'))
+        if lat is None or lng is None or not _is_within_nigeria(lat, lng):
+            continue
+
+        address = item.get('address') or {}
+        results.append(
+            {
+                'label': item.get('display_name', f'{lat}, {lng}'),
+                'latitude': round(lat, 8),
+                'longitude': round(lng, 8),
+                'type': item.get('type', ''),
+                'state': _normalise_state(address.get('state', '')),
+                'lga': _extract_lga(address),
+                'place_id': str(item.get('place_id', '')),
+            }
+        )
+    return results
+
+
+def _mapbox_reverse_geocode(lat: float, lng: float) -> dict:
+    """Reverse geocode with Mapbox Geocoding v6 when a token is configured."""
+    token = _get_mapbox_token()
+    if not token:
+        return {}
+
+    data = _request_json(
+        'GET',
+        MAPBOX_GEOCODE_REVERSE_URL,
+        service_name='Mapbox reverse geocode',
+        params={
+            'longitude': lng,
+            'latitude': lat,
+            'language': 'en',
+            'access_token': token,
+        },
+        timeout=10,
+    )
+    if not isinstance(data, dict):
+        return {}
+
+    features = data.get('features') or []
+    for feature in features:
+        properties = feature.get('properties') or {}
+        context = properties.get('context') or {}
+        label = (
+            properties.get('full_address')
+            or ', '.join(
+                [part for part in (properties.get('name'), properties.get('place_formatted')) if part]
+            )
+            or f'{lat}, {lng}'
+        )
+        if not label:
+            continue
+
+        return {
+            'address': label,
+            'state': _normalise_state(_mapbox_context_name(context, 'region')),
+            'lga': _extract_mapbox_lga(context),
+            'place_id': str(properties.get('mapbox_id') or feature.get('id') or ''),
+        }
+    return {}
+
+
 def _get_mapbox_zoom(radius_km: float) -> int:
     """Convert a scan radius in kilometres into a Mapbox static-image zoom."""
     for max_radius, zoom in MAPBOX_ZOOM_BREAKPOINTS:
@@ -291,6 +487,10 @@ def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> fl
 
 def get_location_info(lat: float, lng: float) -> dict:
     """Reverse geocode coordinates into address, state, LGA, and place ID."""
+    mapbox_result = _mapbox_reverse_geocode(lat, lng)
+    if mapbox_result:
+        return mapbox_result
+
     time.sleep(NOMINATIM_DELAY_SECONDS)
     data = _request_json(
         'GET',
@@ -742,46 +942,14 @@ def run_land_scan(scan, full_report: bool = False) -> dict:
 
 
 def forward_geocode(query: str, limit: int = DEFAULT_GEOCODE_LIMIT) -> list[dict]:
-    """Forward geocode a Nigerian address using Nominatim autocomplete search."""
-    time.sleep(NOMINATIM_DELAY_SECONDS)
+    """Forward geocode a Nigerian address using Mapbox first, Nominatim second."""
     capped_limit = max(1, min(int(limit), MAX_GEOCODE_LIMIT))
-    data = _request_json(
-        'GET',
-        NOMINATIM_SEARCH_URL,
-        service_name='Nominatim forward geocode',
-        params={
-            'q': query,
-            'countrycodes': 'ng',
-            'format': 'json',
-            'addressdetails': 1,
-            'limit': capped_limit,
-        },
-        headers=NOMINATIM_HEADERS,
-        timeout=10,
-    )
-    if not isinstance(data, list):
-        return []
+    mapbox_results = _mapbox_forward_geocode(query, capped_limit)
+    if len(mapbox_results) >= capped_limit:
+        return mapbox_results[:capped_limit]
 
-    results = []
-    for item in data:
-        lat = _safe_float(item.get('lat'))
-        lng = _safe_float(item.get('lon'))
-        if lat is None or lng is None or not _is_within_nigeria(lat, lng):
-            continue
-
-        address = item.get('address') or {}
-        results.append(
-            {
-                'label': item.get('display_name', f'{lat}, {lng}'),
-                'latitude': round(lat, 8),
-                'longitude': round(lng, 8),
-                'type': item.get('type', ''),
-                'state': _normalise_state(address.get('state', '')),
-                'lga': _extract_lga(address),
-                'place_id': str(item.get('place_id', '')),
-            }
-        )
-    return results
+    fallback_results = _nominatim_forward_geocode(query, capped_limit)
+    return _dedupe_geocode_results(mapbox_results + fallback_results, capped_limit)
 
 
 def get_current_weather(lat: float, lng: float) -> dict | None:

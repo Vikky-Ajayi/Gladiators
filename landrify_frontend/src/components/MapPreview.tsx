@@ -5,20 +5,37 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 interface Props {
   latitude: number | null;
   longitude: number | null;
-  /** Scan area radius in km — drives the visible circle. */
   radiusKm: number;
-  /** Optional: when set, the user can click the map to drop / move the pin. */
   onPick?: (lat: number, lng: number) => void;
   className?: string;
 }
 
-const NIGERIA_CENTER: [number, number] = [8.0, 9.0]; // lng, lat
+const NIGERIA_CENTER: [number, number] = [8.0, 9.0];
+const OPEN_STREET_MAP_STYLE = {
+  version: 8,
+  sources: {
+    'osm-tiles': {
+      type: 'raster',
+      tiles: [
+        'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      ],
+      tileSize: 256,
+      attribution: '© OpenStreetMap contributors',
+    },
+  },
+  layers: [
+    {
+      id: 'osm-tiles',
+      type: 'raster',
+      source: 'osm-tiles',
+      minzoom: 0,
+      maxzoom: 22,
+    },
+  ],
+} as const;
 
-/**
- * Lightweight Mapbox satellite preview that visualises a point + circular
- * scan radius. If no Mapbox token is configured, falls back to a simple
- * static placeholder with the coordinates.
- */
 export function MapPreview({
   latitude,
   longitude,
@@ -26,18 +43,16 @@ export function MapPreview({
   onPick,
   className,
 }: Props) {
-  const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN ?? '';
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markerRef = useRef<mapboxgl.Marker | null>(null);
 
-  // Init map once we have a token + a container.
   useEffect(() => {
-    if (!mapboxToken || !containerRef.current || mapRef.current) return;
-    mapboxgl.accessToken = mapboxToken;
+    if (!containerRef.current || mapRef.current) return;
+
     const map = new mapboxgl.Map({
       container: containerRef.current,
-      style: 'mapbox://styles/mapbox/satellite-streets-v12',
+      style: OPEN_STREET_MAP_STYLE as any,
       center: NIGERIA_CENTER,
       zoom: 5.5,
       attributionControl: true,
@@ -46,7 +61,7 @@ export function MapPreview({
     mapRef.current = map;
 
     if (onPick) {
-      map.on('click', (e) => onPick(e.lngLat.lat, e.lngLat.lng));
+      map.on('click', (event) => onPick(event.lngLat.lat, event.lngLat.lng));
       map.getCanvas().style.cursor = 'crosshair';
     }
 
@@ -73,9 +88,8 @@ export function MapPreview({
       map.remove();
       mapRef.current = null;
     };
-  }, [mapboxToken, onPick]);
+  }, [onPick]);
 
-  // Update marker + circle whenever coords / radius change.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || latitude == null || longitude == null) return;
@@ -96,59 +110,28 @@ export function MapPreview({
     });
 
     const update = () => {
-      const src = map.getSource('scan-circle') as mapboxgl.GeoJSONSource | undefined;
-      if (!src) return;
-      src.setData(circlePolygon(latitude, longitude, radiusKm));
+      const source = map.getSource('scan-circle') as mapboxgl.GeoJSONSource | undefined;
+      if (!source) return;
+      source.setData(circlePolygon(latitude, longitude, radiusKm));
     };
     if (map.isStyleLoaded()) update();
     else map.once('load', update);
   }, [latitude, longitude, radiusKm]);
 
-  // Mobile-first sizing: square on phones (much bigger preview the user asked
-  // for), 16/10 on tablets and up. We expose this on every render path.
   const aspectClass = 'aspect-square sm:aspect-[16/10]';
-
-  if (!mapboxToken) {
-    // No token → show static satellite tile via the backend if available.
-    const fallbackLat = latitude ?? NIGERIA_CENTER[1];
-    const fallbackLng = longitude ?? NIGERIA_CENTER[0];
-    const staticUrl = `https://tile.openstreetmap.org/6/${Math.floor(((fallbackLng + 180) / 360) * 64)}/${Math.floor((1 - Math.log(Math.tan((fallbackLat * Math.PI) / 180) + 1 / Math.cos((fallbackLat * Math.PI) / 180)) / Math.PI) / 2 * 64)}.png`;
-    return (
-      <div className={`relative w-full bg-gray-100 rounded-2xl overflow-hidden ${className ?? ''}`}>
-        <div className={`${aspectClass} flex flex-col items-center justify-center text-center px-6 text-gray-500 bg-cover bg-center relative`}
-          style={{ backgroundImage: `url(${staticUrl})` }}
-        >
-          <div className="absolute inset-0 bg-white/80 backdrop-blur-sm" />
-          <div className="relative">
-            <p className="text-sm font-medium">Map preview unavailable</p>
-            <p className="text-xs mt-1 max-w-xs">
-              Mapbox token not configured. Live satellite preview requires{' '}
-              <code className="bg-gray-200 px-1 rounded text-[11px]">VITE_MAPBOX_TOKEN</code> in the frontend env.
-            </p>
-            {latitude != null && longitude != null && (
-              <p className="text-[11px] font-mono mt-3">
-                {latitude.toFixed(5)}, {longitude.toFixed(5)} · scan radius {(radiusKm * 1000).toFixed(0)} m
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className={`relative w-full rounded-2xl overflow-hidden ${className ?? ''}`}>
       <div ref={containerRef} className={`${aspectClass} w-full bg-gray-200`} />
       {latitude != null && longitude != null && (
-        <div className="absolute bottom-2 left-2 z-10 px-2 py-1 rounded-md bg-black/60 text-white text-[10.5px] font-mono pointer-events-none">
-          scan radius {(radiusKm * 1000).toFixed(0)} m · {(Math.PI * radiusKm * radiusKm * 100).toFixed(2)} ha
+        <div className="absolute bottom-2 left-2 z-10 rounded-md bg-black/60 px-2 py-1 text-[10.5px] font-mono text-white pointer-events-none">
+          scan radius {(radiusKm * 1000).toFixed(0)} m | {(Math.PI * radiusKm * radiusKm * 100).toFixed(2)} ha
         </div>
       )}
     </div>
   );
 }
 
-/** Build a 64-vertex GeoJSON polygon approximating a metric circle. */
 function circlePolygon(lat: number, lng: number, radiusKm: number): GeoJSON.Feature<GeoJSON.Polygon> {
   const points: [number, number][] = [];
   const earthR = 6371;

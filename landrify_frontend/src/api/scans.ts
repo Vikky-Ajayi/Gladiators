@@ -15,7 +15,7 @@ export interface GeocodeResult {
   type?: string;
   state?: string;
   lga?: string;
-  place_id?: number;
+  place_id?: string | number;
 }
 
 /**
